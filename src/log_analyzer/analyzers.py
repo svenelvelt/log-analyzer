@@ -105,6 +105,34 @@ class EventsPerSecond:
         return {"average": self._events / seconds, "peak": self._peak}
 
 
+class BytesResult(TypedDict):
+    total: int
+    unknown: int
+
+
+class TotalBytes:
+    """Total response bytes delivered to clients.
+
+    Squid logs -1 when the size is unknown. Those events are counted in
+    `unknown` instead of the total, so the total is a lower bound.
+    """
+
+    name = "bytes"
+
+    def __init__(self) -> None:
+        self._total = 0
+        self._unknown = 0
+
+    def update(self, record: LogRecord) -> None:
+        if record.response_size is None:
+            self._unknown += 1
+        else:
+            self._total += record.response_size
+
+    def result(self) -> BytesResult:
+        return {"total": self._total, "unknown": self._unknown}
+
+
 def _address_order(value: str) -> tuple[int, int, int, str]:
     """Sort key: IPv4 by address, then IPv6 by address, then anything else as text."""
     try:

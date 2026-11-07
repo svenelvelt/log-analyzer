@@ -23,7 +23,9 @@ Squid native `access.log`, 10 fields per line.
 - The spec calls the format CSV, but the fields are whitespace-separated and Squid pads the
   second column, so lines are split on any run of whitespace.
 - The spec describes field 2 as the response header size. In Squid's native format it's the
-  request duration in milliseconds, so it's stored as `elapsed_ms`.
+  request duration in milliseconds
+  ([Squid docs](https://wiki.squid-cache.org/Features/LogFormat#squid-native-accesslog-format-in-detail)),
+  so it's stored as `elapsed_ms`.
 - Squid logs `-1` when a size or duration is unknown. About 61% of the sample lines have
   `-1` as response size, so these are parsed as `None` instead of rejecting the line. Other
   negative values are treated as malformed.
@@ -102,3 +104,24 @@ SIEM sizing usually looks at average and peak EPS, so the result has both:
   at the jumps between periods. If events from one second are split up, for example two
   proxies' logs covering the same time, the peak can come out too low but never too high.
 - With no valid records the result is `{"average": 0.0, "peak": 0}`.
+
+#### Total bytes (`--bytes`)
+
+```json
+{"total": 2216979451, "unknown": 1001183}
+```
+
+- `total` is the sum of field 5. Squid's
+  [log format docs](https://wiki.squid-cache.org/Features/LogFormat#squid-native-accesslog-format-in-detail)
+  describe it as "the amount of data delivered to the client", and note that "headers are
+  also counted". In the [`logformat`](https://www.squid-cache.org/Doc/config/logformat/)
+  definition of the native format it's `%<st`, "Total size of reply sent to client".
+- That's the only byte count in the native format. Squid can log the full traffic in both
+  directions with `%st` ("Total size of request + reply traffic with client"), but only
+  with a custom `logformat`, so "bytes exchanged" here means bytes delivered to clients.
+- Field 2 isn't added, even though the spec calls it the header size. It's `%tr`, the
+  response time in milliseconds, and the headers are already part of field 5.
+- `unknown` counts events where Squid logged `-1` as the size. In the sample that's 61% of
+  all events, including about 348,000 `TCP_MISS/200` responses that did send content, so
+  the total is a lower bound.
+- With no valid records the result is `{"total": 0, "unknown": 0}`.

@@ -2,17 +2,25 @@ from collections.abc import Iterable
 
 import pytest
 
-from log_analyzer.analyzers import Analyzer, EventsPerSecond, LeastFrequentIp, MostFrequentIp
+from log_analyzer.analyzers import (
+    Analyzer,
+    EventsPerSecond,
+    LeastFrequentIp,
+    MostFrequentIp,
+    TotalBytes,
+)
 from log_analyzer.models import LogRecord
 
 
-def record(ip: str = "10.0.0.1", timestamp: float = 0.0) -> LogRecord:
+def record(
+    ip: str = "10.0.0.1", timestamp: float = 0.0, response_size: int | None = 0
+) -> LogRecord:
     return LogRecord(
         timestamp=timestamp,
         elapsed_ms=0,
         client_ip=ip,
         result_code="TCP_MISS/200",
-        response_size=0,
+        response_size=response_size,
         method="GET",
         url="http://example.com/",
         user="-",
@@ -30,6 +38,12 @@ def run(analyzer: Analyzer, ips: Iterable[str]) -> object:
 def run_at(analyzer: Analyzer, timestamps: Iterable[float]) -> object:
     for ts in timestamps:
         analyzer.update(record(timestamp=ts))
+    return analyzer.result()
+
+
+def run_sizes(analyzer: Analyzer, sizes: Iterable[int | None]) -> object:
+    for size in sizes:
+        analyzer.update(record(response_size=size))
     return analyzer.result()
 
 
@@ -107,3 +121,19 @@ def test_eps_peak_assumes_time_order() -> None:
 
 def test_eps_no_records() -> None:
     assert run_at(EventsPerSecond(), []) == {"average": 0.0, "peak": 0}
+
+
+def test_bytes_name() -> None:
+    assert TotalBytes().name == "bytes"
+
+
+def test_bytes() -> None:
+    assert run_sizes(TotalBytes(), [399, 0, 19763]) == {"total": 20162, "unknown": 0}
+
+
+def test_bytes_counts_unknown_sizes_separately() -> None:
+    assert run_sizes(TotalBytes(), [399, None, None]) == {"total": 399, "unknown": 2}
+
+
+def test_bytes_no_records() -> None:
+    assert run_sizes(TotalBytes(), []) == {"total": 0, "unknown": 0}
