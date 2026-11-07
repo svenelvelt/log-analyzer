@@ -1,3 +1,4 @@
+import gzip
 import logging
 from pathlib import Path
 
@@ -26,6 +27,27 @@ def test_reads_plain_file(tmp_path: Path) -> None:
 
     assert [r.client_ip for r in records] == ["10.0.0.1", "10.0.0.2"]
     assert stats == ReadStats(lines=2, records=2)
+
+
+def test_detects_gzip_by_content_not_name(tmp_path: Path) -> None:
+    path = tmp_path / "access.log"
+    path.write_bytes(
+        gzip.compress(f"{squid_line('10.0.0.1')}\n{squid_line('10.0.0.2')}\n".encode())
+    )
+
+    records, stats = read_all(path)
+
+    assert [r.client_ip for r in records] == ["10.0.0.1", "10.0.0.2"]
+    assert stats == ReadStats(lines=2, records=2)
+
+
+def test_plain_text_named_gz_is_read_as_text(tmp_path: Path) -> None:
+    path = tmp_path / "access.log.gz"
+    path.write_text(f"{squid_line()}\n")
+
+    records, _ = read_all(path)
+
+    assert len(records) == 1
 
 
 def test_last_line_without_newline(tmp_path: Path) -> None:
