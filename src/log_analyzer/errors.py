@@ -4,3 +4,7 @@ class LogAnalyzerError(Exception):
 
 class ParseError(LogAnalyzerError):
     pass
+
+
+class InputError(LogAnalyzerError):
+    pass

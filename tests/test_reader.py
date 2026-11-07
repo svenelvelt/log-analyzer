@@ -1,9 +1,11 @@
 import gzip
 import logging
+import re
 from pathlib import Path
 
 import pytest
 
+from log_analyzer.errors import InputError
 from log_analyzer.models import LogRecord
 from log_analyzer.parsers.squid import parse_line
 from log_analyzer.reader import MAX_LINE_BYTES, ReadStats, read_records
@@ -165,3 +167,42 @@ def test_overlong_last_line_without_newline(tmp_path: Path) -> None:
 
     assert len(records) == 1
     assert stats == ReadStats(lines=2, records=1, skipped=1)
+
+
+def test_missing_file(tmp_path: Path) -> None:
+    path = tmp_path / "nope.log"
+
+    with pytest.raises(InputError, match=re.escape(str(path))):
+        read_all(path)
+
+
+def test_directory(tmp_path: Path) -> None:
+    with pytest.raises(InputError, match=re.escape(str(tmp_path))):
+        read_all(tmp_path)
+
+
+def test_truncated_gzip(tmp_path: Path) -> None:
+    path = tmp_path / "access.log.gz"
+    data = gzip.compress(f"{squid_line()}\n".encode() * 1000)
+    path.write_bytes(data[: len(data) // 2])
+
+    with pytest.raises(InputError, match=re.escape(str(path))):
+        read_all(path)
+
+
+def test_corrupt_gzip_header(tmp_path: Path) -> None:
+    path = tmp_path / "access.log.gz"
+    path.write_bytes(b"\x1f\x8b" + b"not really gzip")
+
+    with pytest.raises(InputError, match=re.escape(str(path))):
+        read_all(path)
+
+
+def test_corrupt_gzip_data(tmp_path: Path) -> None:
+    path = tmp_path / "access.log.gz"
+    data = bytearray(gzip.compress(f"{squid_line()}\n".encode() * 1000))
+    data[30:60] = b"\xff" * 30
+    path.write_bytes(data)
+
+    with pytest.raises(InputError, match=re.escape(str(path))):
+        read_all(path)

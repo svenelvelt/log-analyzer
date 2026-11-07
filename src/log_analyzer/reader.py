@@ -3,11 +3,12 @@
 import gzip
 import io
 import logging
+import zlib
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
-from log_analyzer.errors import ParseError
+from log_analyzer.errors import InputError, ParseError
 from log_analyzer.models import LogRecord
 
 log = logging.getLogger(__name__)
@@ -35,20 +36,26 @@ def read_records(
 
     Malformed lines are skipped. Each one is logged at DEBUG, with a WARNING
     summary per file. Invalid UTF-8 is replaced with U+FFFD.
+
+    Raises InputError if the file can't be opened or decompressed. Records
+    yielded before the error (e.g. from a truncated gzip) stay counted.
     """
-    with _open(path) as f:
-        for lineno, line in enumerate(_bounded_lines(f, max_line_bytes), 1):
-            stats.lines += 1
-            try:
-                if line is None:
-                    raise ParseError(f"line longer than {max_line_bytes} bytes")
-                record = parse(line.decode("utf-8", errors="replace"))
-            except ParseError as e:
-                stats.skipped += 1
-                log.debug("%s:%d: %s", path, lineno, e)
-                continue
-            stats.records += 1
-            yield record
+    try:
+        with _open(path) as f:
+            for lineno, line in enumerate(_bounded_lines(f, max_line_bytes), 1):
+                stats.lines += 1
+                try:
+                    if line is None:
+                        raise ParseError(f"line longer than {max_line_bytes} bytes")
+                    record = parse(line.decode("utf-8", errors="replace"))
+                except ParseError as e:
+                    stats.skipped += 1
+                    log.debug("%s:%d: %s", path, lineno, e)
+                    continue
+                stats.records += 1
+                yield record
+    except (OSError, EOFError, zlib.error) as e:
+        raise InputError(f"{path}: {e}") from e
 
     if stats.skipped:
         log.warning("%s: skipped %d of %d lines", path, stats.skipped, stats.lines)
