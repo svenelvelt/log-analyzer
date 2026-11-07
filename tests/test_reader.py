@@ -1,4 +1,7 @@
+import logging
 from pathlib import Path
+
+import pytest
 
 from log_analyzer.models import LogRecord
 from log_analyzer.parsers.squid import parse_line
@@ -51,3 +54,38 @@ def test_empty_file(tmp_path: Path) -> None:
 
     assert records == []
     assert stats == ReadStats()
+
+
+def test_skips_and_counts_malformed_lines(tmp_path: Path) -> None:
+    path = tmp_path / "access.log"
+    path.write_text(f"\n{squid_line()}\ngarbage\n{squid_line()}\n")
+
+    records, stats = read_all(path)
+
+    assert len(records) == 2
+    assert stats == ReadStats(lines=4, records=2, skipped=2)
+
+
+def test_logs_details_at_debug_and_summary_at_warning(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    path = tmp_path / "access.log"
+    path.write_text(f"{squid_line()}\ngarbage\n")
+
+    with caplog.at_level(logging.DEBUG, logger="log_analyzer"):
+        read_all(path)
+
+    debug = [r.getMessage() for r in caplog.records if r.levelno == logging.DEBUG]
+    warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert debug == [f"{path}:2: expected 10 fields, got 1"]
+    assert warnings == [f"{path}: skipped 1 of 2 lines"]
+
+
+def test_no_warning_when_nothing_skipped(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    path = tmp_path / "access.log"
+    path.write_text(f"{squid_line()}\n")
+
+    with caplog.at_level(logging.WARNING, logger="log_analyzer"):
+        read_all(path)
+
+    assert caplog.records == []
