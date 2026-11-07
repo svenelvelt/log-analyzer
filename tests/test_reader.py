@@ -6,16 +6,16 @@ import pytest
 
 from log_analyzer.models import LogRecord
 from log_analyzer.parsers.squid import parse_line
-from log_analyzer.reader import ReadStats, read_records
+from log_analyzer.reader import MAX_LINE_BYTES, ReadStats, read_records
 
 
 def squid_line(ip: str = "10.0.0.1", url: str = "http://example.com/") -> str:
     return f"1157689324.156   1372 {ip} TCP_MISS/200 399 GET {url} - DIRECT/1.2.3.4 text/html"
 
 
-def read_all(path: Path) -> tuple[list[LogRecord], ReadStats]:
+def read_all(path: Path, max_line_bytes: int = MAX_LINE_BYTES) -> tuple[list[LogRecord], ReadStats]:
     stats = ReadStats()
-    records = list(read_records(path, parse_line, stats))
+    records = list(read_records(path, parse_line, stats, max_line_bytes))
     return records, stats
 
 
@@ -130,3 +130,38 @@ def test_no_warning_when_nothing_skipped(tmp_path: Path, caplog: pytest.LogCaptu
         read_all(path)
 
     assert caplog.records == []
+
+
+def test_skips_overlong_line_and_continues(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    path = tmp_path / "access.log"
+    huge = squid_line(url="http://example.com/" + "a" * 1000)
+    path.write_text(f"{squid_line('10.0.0.1')}\n{huge}\n{squid_line('10.0.0.2')}\n")
+
+    with caplog.at_level(logging.DEBUG, logger="log_analyzer"):
+        records, stats = read_all(path, max_line_bytes=200)
+
+    assert [r.client_ip for r in records] == ["10.0.0.1", "10.0.0.2"]
+    assert stats == ReadStats(lines=3, records=2, skipped=1)
+    assert f"{path}:2: line longer than 200 bytes" in caplog.messages
+
+
+def test_line_at_exact_limit_is_accepted(tmp_path: Path) -> None:
+    path = tmp_path / "access.log"
+    line = f"{squid_line()}\n".encode()
+    path.write_bytes(line)
+
+    records, _ = read_all(path, max_line_bytes=len(line))
+
+    assert len(records) == 1
+
+
+def test_overlong_last_line_without_newline(tmp_path: Path) -> None:
+    path = tmp_path / "access.log"
+    path.write_text(f"{squid_line()}\n" + "a" * 1000)
+
+    records, stats = read_all(path, max_line_bytes=200)
+
+    assert len(records) == 1
+    assert stats == ReadStats(lines=2, records=1, skipped=1)
