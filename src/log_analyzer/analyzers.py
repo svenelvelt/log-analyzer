@@ -1,6 +1,7 @@
 """Streaming analyzers. Each one sees every record once and produces a JSON-serializable result."""
 
 import ipaddress
+import math
 from abc import ABC, abstractmethod
 from collections import Counter
 from collections.abc import Iterable
@@ -60,6 +61,48 @@ class LeastFrequentIp(_IpFrequency):
 
     def _select(self, counts: Iterable[int]) -> int:
         return min(counts)
+
+
+class EpsResult(TypedDict):
+    average: float
+    peak: int
+
+
+class EventsPerSecond:
+    """Average and peak events per second, in constant memory.
+
+    The average is taken over the whole seconds from the earliest to the latest
+    event, inclusive. The peak counts consecutive events in the same second, so
+    it assumes input in time order, which is how Squid writes its log.
+    """
+
+    name = "eps"
+
+    def __init__(self) -> None:
+        self._events = 0
+        self._earliest = math.inf
+        self._latest = -math.inf
+        self._peak = 0
+        self._second: int | None = None
+        self._run = 0
+
+    def update(self, record: LogRecord) -> None:
+        self._events += 1
+        self._earliest = min(self._earliest, record.timestamp)
+        self._latest = max(self._latest, record.timestamp)
+
+        second = int(record.timestamp)
+        if second == self._second:
+            self._run += 1
+        else:
+            self._second, self._run = second, 1
+        self._peak = max(self._peak, self._run)
+
+    def result(self) -> EpsResult:
+        if not self._events:
+            return {"average": 0.0, "peak": 0}
+        seconds = int(self._latest) - int(self._earliest) + 1
+        return {"average": self._events / seconds, "peak": self._peak}
 
 
 def _address_order(value: str) -> tuple[int, int, int, str]:

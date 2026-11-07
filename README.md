@@ -49,8 +49,11 @@ Squid native `access.log`, 10 fields per line.
 
 ### Operations
 
-- With several input files, results are aggregated over all of them, e.g. rotated
-  `access.log.1`, `access.log.2`, ... give one answer per operation.
+With several input files, results are aggregated over all of them, e.g. rotated
+`access.log.1`, `access.log.2`, ... give one answer per operation.
+
+#### Most and least frequent IP (`--mfip`, `--lfip`)
+
 - The spec asks for "the" most and least frequent IP, but ties are common: in the sample
   file 30 IPs share the lowest count of 1 request. Picking one of them would depend on input
   order or an arbitrary tie-break and hide the rest, so all tied IPs are returned together
@@ -65,3 +68,37 @@ Squid native `access.log`, 10 fields per line.
   client field is counted as is, so if Squid logs hostnames (`log_fqdn on`) those are
   counted too and sorted after the addresses.
 - With no valid records the result is `{"ips": [], "count": 0}`.
+
+#### Events per second (`--eps`)
+
+The sample file isn't one continuous log. It has four periods with years between them:
+
+| Period (UTC)             | Events    | Duration | Rate    |
+|--------------------------|-----------|----------|---------|
+| 2002-10-19 to 2002-10-23 | 138,305   | 3.6 days | 0.45/s  |
+| 2006-09-08               | 82,946    | 4 h      | 5.8/s   |
+| 2012-04-23               | 199,247   | 5 h      | 10.7/s  |
+| 2012-04-27 to 2012-05-02 | 1,223,020 | 4.5 days | 3.2/s   |
+
+So a single "events per second" number depends heavily on the definition. Events divided
+by the time from first to last event gives 0.0055, because the gaps dominate. Dividing by
+only the seconds that have events gives 3.56, but that ignores quiet seconds and overstates
+the rate. Splitting into periods needs an arbitrary gap threshold.
+
+SIEM sizing usually looks at average and peak EPS, so the result has both:
+
+```json
+{"average": 0.0055, "peak": 7952}
+```
+
+- `average` is the number of events divided by the whole seconds from the earliest to the
+  latest event, inclusive. That's the plain reading of the spec, and the +1 means a single
+  event gives 1.0 instead of a division by zero. Earliest and latest are the minimum and
+  maximum timestamps, so the order the files are given in doesn't matter.
+- `peak` is the most events in any one second. It's computed by counting consecutive
+  events with the same second, which keeps memory constant instead of storing a count per
+  second (461k seconds, about 34 MiB, for the sample). This relies on each file being in
+  time order, which is how Squid writes it: the sample only goes back in time twice, both
+  at the jumps between periods. If events from one second are split up, for example two
+  proxies' logs covering the same time, the peak can come out too low but never too high.
+- With no valid records the result is `{"average": 0.0, "peak": 0}`.

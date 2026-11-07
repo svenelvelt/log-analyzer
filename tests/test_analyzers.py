@@ -1,12 +1,14 @@
 from collections.abc import Iterable
 
-from log_analyzer.analyzers import Analyzer, LeastFrequentIp, MostFrequentIp
+import pytest
+
+from log_analyzer.analyzers import Analyzer, EventsPerSecond, LeastFrequentIp, MostFrequentIp
 from log_analyzer.models import LogRecord
 
 
-def record(ip: str) -> LogRecord:
+def record(ip: str = "10.0.0.1", timestamp: float = 0.0) -> LogRecord:
     return LogRecord(
-        timestamp=0.0,
+        timestamp=timestamp,
         elapsed_ms=0,
         client_ip=ip,
         result_code="TCP_MISS/200",
@@ -22,6 +24,12 @@ def record(ip: str) -> LogRecord:
 def run(analyzer: Analyzer, ips: Iterable[str]) -> object:
     for ip in ips:
         analyzer.update(record(ip))
+    return analyzer.result()
+
+
+def run_at(analyzer: Analyzer, timestamps: Iterable[float]) -> object:
+    for ts in timestamps:
+        analyzer.update(record(timestamp=ts))
     return analyzer.result()
 
 
@@ -64,3 +72,38 @@ def test_lfip_returns_all_ties_sorted_by_address() -> None:
 
 def test_lfip_no_records() -> None:
     assert run(LeastFrequentIp(), []) == {"ips": [], "count": 0}
+
+
+def test_eps_name() -> None:
+    assert EventsPerSecond().name == "eps"
+
+
+def test_eps() -> None:
+    # seconds 100 to 104 inclusive = 5 s, 4 events; second 100 has 2
+    result = run_at(EventsPerSecond(), [100.0, 100.5, 101.2, 104.9])
+    assert result == {"average": pytest.approx(0.8), "peak": 2}
+
+
+def test_eps_single_event() -> None:
+    assert run_at(EventsPerSecond(), [100.3]) == {"average": 1.0, "peak": 1}
+
+
+def test_eps_all_in_one_second() -> None:
+    assert run_at(EventsPerSecond(), [100.1, 100.2, 100.9]) == {"average": 3.0, "peak": 3}
+
+
+def test_eps_average_uses_earliest_and_latest_not_first_and_last_seen() -> None:
+    # rotated logs passed newest first: seconds 100 to 201 = 102 s
+    result = run_at(EventsPerSecond(), [200.0, 201.0, 100.0])
+    assert result == {"average": pytest.approx(3 / 102), "peak": 1}
+
+
+def test_eps_peak_assumes_time_order() -> None:
+    # Squid writes lines in time order. If a second's events are split up,
+    # each run is counted separately, so the peak can only come out too low.
+    result = run_at(EventsPerSecond(), [5.0, 5.1, 6.0, 5.2])
+    assert result == {"average": pytest.approx(2.0), "peak": 2}
+
+
+def test_eps_no_records() -> None:
+    assert run_at(EventsPerSecond(), []) == {"average": 0.0, "peak": 0}
