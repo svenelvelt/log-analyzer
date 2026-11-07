@@ -47,9 +47,12 @@ def read_records(path: Path, parse: Parser, stats: ReadStats) -> Iterator[LogRec
 
 
 def _open(path: Path) -> TextIO:
-    """Open `path` as text, decompressing if it starts with the gzip magic bytes."""
+    """Open `path` as text, decompressing if it starts with the gzip magic bytes.
+
+    Invalid UTF-8 is replaced with U+FFFD rather than failing the whole file.
+    """
     with path.open("rb") as f:
         is_gzip = f.read(2) == GZIP_MAGIC
     if is_gzip:
-        return gzip.open(path, "rt", encoding="utf-8")
-    return path.open(encoding="utf-8")
+        return gzip.open(path, "rt", encoding="utf-8", errors="replace")
+    return path.open(encoding="utf-8", errors="replace")

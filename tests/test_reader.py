@@ -50,6 +50,25 @@ def test_plain_text_named_gz_is_read_as_text(tmp_path: Path) -> None:
     assert len(records) == 1
 
 
+def test_invalid_utf8_is_replaced(tmp_path: Path) -> None:
+    path = tmp_path / "access.log"
+    path.write_bytes(squid_line(url="http://example.com/caf\xe9").encode("latin-1") + b"\n")
+
+    records, _ = read_all(path)
+
+    assert records[0].url == "http://example.com/caf\ufffd"
+
+
+def test_invalid_utf8_in_gzip_is_replaced(tmp_path: Path) -> None:
+    path = tmp_path / "access.log.gz"
+    line = squid_line(url="http://example.com/caf\xe9").encode("latin-1") + b"\n"
+    path.write_bytes(gzip.compress(line))
+
+    records, _ = read_all(path)
+
+    assert records[0].url == "http://example.com/caf\ufffd"
+
+
 def test_last_line_without_newline(tmp_path: Path) -> None:
     path = tmp_path / "access.log"
     path.write_text(f"{squid_line('10.0.0.1')}\n{squid_line('10.0.0.2')}")
