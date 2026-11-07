@@ -1,6 +1,6 @@
 from collections.abc import Iterable
 
-from log_analyzer.analyzers import Analyzer, MostFrequentIp
+from log_analyzer.analyzers import Analyzer, LeastFrequentIp, MostFrequentIp
 from log_analyzer.models import LogRecord
 
 
@@ -46,3 +46,21 @@ def test_mfip_sorts_ipv4_then_ipv6_then_other() -> None:
 
 def test_mfip_no_records() -> None:
     assert run(MostFrequentIp(), []) == {"ips": [], "count": 0}
+
+
+def test_lfip_name() -> None:
+    assert LeastFrequentIp().name == "lfip"
+
+
+def test_lfip() -> None:
+    ips = ["10.0.0.1", "10.0.0.1", "10.0.0.2", "10.0.0.3", "10.0.0.3"]
+    assert run(LeastFrequentIp(), ips) == {"ips": ["10.0.0.2"], "count": 1}
+
+
+def test_lfip_returns_all_ties_sorted_by_address() -> None:
+    ips = ["10.0.0.10", "10.0.0.2", "10.0.0.1", "10.0.0.1"]
+    assert run(LeastFrequentIp(), ips) == {"ips": ["10.0.0.2", "10.0.0.10"], "count": 1}
+
+
+def test_lfip_no_records() -> None:
+    assert run(LeastFrequentIp(), []) == {"ips": [], "count": 0}

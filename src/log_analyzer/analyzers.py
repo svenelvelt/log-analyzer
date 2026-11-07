@@ -1,7 +1,9 @@
 """Streaming analyzers. Each one sees every record once and produces a JSON-serializable result."""
 
 import ipaddress
+from abc import ABC, abstractmethod
 from collections import Counter
+from collections.abc import Iterable
 from typing import Protocol, TypedDict
 
 from log_analyzer.models import LogRecord
@@ -20,10 +22,10 @@ class IpResult(TypedDict):
     count: int
 
 
-class MostFrequentIp:
-    """Client IP(s) with the most requests. All tied IPs are returned."""
+class _IpFrequency(ABC):
+    """Counts requests per client IP. Subclasses choose which count they report."""
 
-    name = "mfip"
+    name: str
 
     def __init__(self) -> None:
         self._counts: Counter[str] = Counter()
@@ -34,9 +36,30 @@ class MostFrequentIp:
     def result(self) -> IpResult:
         if not self._counts:
             return {"ips": [], "count": 0}
-        top = max(self._counts.values())
-        ips = [ip for ip, n in self._counts.items() if n == top]
-        return {"ips": sorted(ips, key=_address_order), "count": top}
+        target = self._select(self._counts.values())
+        ips = [ip for ip, n in self._counts.items() if n == target]
+        return {"ips": sorted(ips, key=_address_order), "count": target}
+
+    @abstractmethod
+    def _select(self, counts: Iterable[int]) -> int: ...
+
+
+class MostFrequentIp(_IpFrequency):
+    """Client IP(s) with the most requests. All tied IPs are returned."""
+
+    name = "mfip"
+
+    def _select(self, counts: Iterable[int]) -> int:
+        return max(counts)
+
+
+class LeastFrequentIp(_IpFrequency):
+    """Client IP(s) with the fewest requests. All tied IPs are returned."""
+
+    name = "lfip"
+
+    def _select(self, counts: Iterable[int]) -> int:
+        return min(counts)
 
 
 def _address_order(value: str) -> tuple[int, int, int, str]:

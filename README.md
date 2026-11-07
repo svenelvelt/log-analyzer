@@ -46,3 +46,22 @@ Squid native `access.log`, 10 fields per line.
   itself, since log lines contain usernames and URLs.
 - A missing, unreadable, truncated or corrupt file raises an error naming the file. With a
   truncated gzip, the records read before the error are still counted.
+
+### Operations
+
+- With several input files, results are aggregated over all of them, e.g. rotated
+  `access.log.1`, `access.log.2`, ... give one answer per operation.
+- The spec asks for "the" most and least frequent IP, but ties are common: in the sample
+  file 30 IPs share the lowest count of 1 request. Picking one of them would depend on input
+  order or an arbitrary tie-break and hide the rest, so all tied IPs are returned together
+  with the shared count. The result has the same shape with or without a tie, like
+  `statistics.multimode` in the standard library:
+
+  ```json
+  {"ips": ["127.0.0.1"], "count": 1422267}
+  ```
+
+- Tied IPs are sorted by address (`10.0.0.2` before `10.0.0.10`), IPv4 before IPv6. The
+  client field is counted as is, so if Squid logs hostnames (`log_fqdn on`) those are
+  counted too and sorted after the addresses.
+- With no valid records the result is `{"ips": [], "count": 0}`.
