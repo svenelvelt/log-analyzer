@@ -235,6 +235,9 @@ Squid native `access.log`, 10 fields per line.
 - Squid logs `-1` when a size or duration is unknown. About 61% of the sample lines have
   `-1` as response size, so these are parsed as `None` instead of rejecting the line. Other
   negative values are treated as malformed.
+- Numbers must be plain ASCII digits, as Squid writes them. Python's `int()` and `float()`
+  would also accept forms like `1_000`, `+5`, `1e9` or `nan`, so the parser checks the
+  format first.
 - Malformed lines (wrong field count, bad timestamp or number) are skipped and counted.
   The sample file has two: an empty first line, and line 82948 where two records ended up
   on the same line.

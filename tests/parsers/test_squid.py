@@ -78,6 +78,18 @@ def test_minus_one_elapsed_means_unknown() -> None:
         pytest.param(
             SAMPLE.replace("1157689324.156", "99999999999999999999.0"), "timestamp", id="huge-ts"
         ),
+        pytest.param(
+            SAMPLE.replace("1157689324.156", "1_157_689_324.156"), "timestamp", id="underscore-ts"
+        ),
+        pytest.param(SAMPLE.replace("1157689324.156", "1.157689e9"), "timestamp", id="exponent-ts"),
+        pytest.param(
+            SAMPLE.replace(" 1372 ", " \u0661\u0663\u0667\u0662 "), "elapsed", id="arabic-digits"
+        ),
+        pytest.param(SAMPLE.replace(" 399 ", " +399 "), "response size", id="plus-size"),
+        pytest.param(SAMPLE.replace(" 399 ", " 1_000 "), "response size", id="underscore-size"),
+        pytest.param(
+            SAMPLE.replace(" 399 ", " " + "9" * 19 + " "), "response size", id="huge-size"
+        ),
         pytest.param(SAMPLE.replace(" 1372 ", " fast "), "elapsed", id="bad-elapsed"),
         pytest.param(SAMPLE.replace(" 1372 ", " -3 "), "elapsed", id="negative-elapsed"),
         pytest.param(SAMPLE.replace(" 399 ", " big "), "response size", id="bad-size"),
