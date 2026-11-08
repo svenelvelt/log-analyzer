@@ -29,6 +29,7 @@ dev = [
     "pytest-cov>=7.1",
     "ruff>=0.17",
     "mypy>=2.4",
+    "pre-commit>=4.7",
 ]
 
 [tool.hatch.version]
@@ -47,6 +48,7 @@ source = ["log_analyzer"]
 branch = true
 
 [tool.coverage.report]
+fail_under = 100
 show_missing = true
 skip_covered = true
 exclude_also = ["if TYPE_CHECKING:", "raise NotImplementedError"]
