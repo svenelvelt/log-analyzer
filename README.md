@@ -216,8 +216,8 @@ of the docstring) are generated from that list.
 ### Adding an input format
 
 Write a function that turns one line into a `LogRecord` or raises `ParseError`, and add it
-to `PARSERS` in `parsers/__init__.py`. Reading, gzip, encoding and error handling are
-shared. The CLI uses the `squid` parser for now; a `--format` option would come with the
+to `PARSERS` in `parsers/__init__.py`. Reading, gzip, encoding, the timestamp range check
+and error handling are shared. The CLI uses the `squid` parser for now; a `--format` option would come with the
 second parser.
 
 ## Assumptions
@@ -249,6 +249,8 @@ Squid native `access.log`, 10 fields per line.
 - Gzip is detected by the magic bytes at the start of the file, not by the `.gz` extension.
 - Input is decoded as UTF-8. Invalid bytes are replaced with U+FFFD instead of failing,
   since they can only show up in the URL or user field.
+- Records with a timestamp before 1970 or after 9999 are skipped as malformed, whatever
+  the input format, because the report turns timestamps into dates.
 - Lines longer than 64 KiB are skipped as malformed. The longest line in the sample file is
   about 4 KiB, so this leaves plenty of room for long URLs while keeping a corrupt file
   without newlines from being read into memory in one go.

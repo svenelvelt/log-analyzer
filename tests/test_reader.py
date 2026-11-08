@@ -8,7 +8,7 @@ import pytest
 from log_analyzer.errors import InputError
 from log_analyzer.models import LogRecord
 from log_analyzer.parsers.squid import parse_line
-from log_analyzer.reader import MAX_LINE_BYTES, ReadStats, read_records
+from log_analyzer.reader import MAX_LINE_BYTES, MAX_TIMESTAMP, ReadStats, read_records
 
 
 def squid_line(ip: str = "10.0.0.1", url: str = "http://example.com/") -> str:
@@ -206,3 +206,34 @@ def test_corrupt_gzip_data(tmp_path: Path) -> None:
 
     with pytest.raises(InputError, match=re.escape(str(path))):
         read_all(path)
+
+
+def record_at(timestamp: float) -> LogRecord:
+    return LogRecord(
+        timestamp=timestamp,
+        elapsed_ms=0,
+        client_ip="10.0.0.1",
+        result_code="TCP_MISS/200",
+        response_size=0,
+        method="GET",
+        url="http://example.com/",
+        user="-",
+        hierarchy="DIRECT/1.2.3.4",
+        content_type="text/html",
+    )
+
+
+def test_skips_timestamps_outside_1970_to_9999_for_any_parser(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    # a stand-in parser: each line is just a timestamp
+    path = tmp_path / "times.log"
+    path.write_text(f"0\n1157689324.5\n{MAX_TIMESTAMP}\n1e20\n-1\n")
+    stats = ReadStats()
+
+    with caplog.at_level(logging.DEBUG, logger="log_analyzer"):
+        records = list(read_records(path, lambda line: record_at(float(line)), stats))
+
+    assert [r.timestamp for r in records] == [0, 1157689324.5, MAX_TIMESTAMP]
+    assert stats == ReadStats(lines=5, records=3, skipped=2)
+    assert f"{path}:4: timestamp 1e+20 out of range" in caplog.messages

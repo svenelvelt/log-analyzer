@@ -1,15 +1,12 @@
 """Parser for Squid's native access.log format."""
 
 import re
-from datetime import UTC, datetime
 
 from log_analyzer.errors import ParseError
 from log_analyzer.models import LogRecord
 
 FIELD_COUNT = 10
 UNKNOWN = "-1"
-# Anything later can't be turned into a date, which the report needs for its time range.
-MAX_TIMESTAMP = datetime(9999, 12, 31, 23, 59, 59, tzinfo=UTC).timestamp()
 
 # What Squid writes: plain ASCII digits. int() and float() would also take "1_000",
 # "+5", "1e9", "nan" or digits from other scripts. Sizes are capped at 18 digits,
@@ -41,7 +38,7 @@ def parse_line(line: str) -> LogRecord:
 
 
 def _parse_timestamp(raw: str) -> float:
-    if not _TIMESTAMP.fullmatch(raw) or float(raw) > MAX_TIMESTAMP:
+    if not _TIMESTAMP.fullmatch(raw):
         raise ParseError(f"invalid timestamp {raw!r}")
     return float(raw)
 

@@ -6,6 +6,7 @@ import logging
 import zlib
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
 from log_analyzer.errors import InputError, ParseError
@@ -15,6 +16,9 @@ log = logging.getLogger(__name__)
 
 GZIP_MAGIC = b"\x1f\x8b"
 MAX_LINE_BYTES = 64 * 1024
+# The report turns timestamps into dates, so whatever the format, a record must
+# fall between 1970 and the last second a datetime can hold.
+MAX_TIMESTAMP = datetime(9999, 12, 31, 23, 59, 59, tzinfo=UTC).timestamp()
 
 Parser = Callable[[str], LogRecord]
 
@@ -48,6 +52,8 @@ def read_records(
                     if line is None:
                         raise ParseError(f"line longer than {max_line_bytes} bytes")
                     record = parse(line.decode("utf-8", errors="replace"))
+                    if not 0 <= record.timestamp <= MAX_TIMESTAMP:
+                        raise ParseError(f"timestamp {record.timestamp:g} out of range")
                 except ParseError as e:
                     stats.skipped += 1
                     log.debug("%s:%d: %s", path, lineno, e)
