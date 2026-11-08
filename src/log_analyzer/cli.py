@@ -1,13 +1,16 @@
 import argparse
 import inspect
 import json
+import math
 from collections.abc import Sequence
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from log_analyzer import __version__
-from log_analyzer.analyzers import ANALYZERS
+from log_analyzer.analyzers import ANALYZERS, Analyzer
 from log_analyzer.parsers import PARSERS
-from log_analyzer.reader import ReadStats, read_records
+from log_analyzer.reader import Parser, ReadStats, read_records
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -15,16 +18,46 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     selected = [name for name in ANALYZERS if getattr(args, name)] or list(ANALYZERS)
     analyzers = [ANALYZERS[name]() for name in selected]
-    parse = PARSERS["squid"]
 
-    for path in args.inputs:
-        for record in read_records(path, parse, ReadStats()):
-            for analyzer in analyzers:
-                analyzer.update(record)
-
-    report = {"results": {a.name: a.result() for a in analyzers}}
+    report = _analyze(args.inputs, PARSERS["squid"], analyzers)
     args.output.write_text(json.dumps(report, indent=2) + "\n")
     return 0
+
+
+def _analyze(paths: Sequence[Path], parse: Parser, analyzers: list[Analyzer]) -> dict[str, Any]:
+    """Read every file once, feeding each record to all analyzers."""
+    read: list[tuple[Path, ReadStats]] = []
+    earliest, latest = math.inf, -math.inf
+
+    for path in paths:
+        stats = ReadStats()
+        for record in read_records(path, parse, stats):
+            earliest = min(earliest, record.timestamp)
+            latest = max(latest, record.timestamp)
+            for analyzer in analyzers:
+                analyzer.update(record)
+        read.append((path, stats))
+
+    meta = {
+        "tool": f"log-analyzer {__version__}",
+        "files": [
+            {"path": str(p), "lines": s.lines, "events": s.records, "skipped": s.skipped}
+            for p, s in read
+        ],
+        "lines": sum(s.lines for _, s in read),
+        "events": sum(s.records for _, s in read),
+        "skipped": sum(s.skipped for _, s in read),
+        "first": _iso(earliest),
+        "last": _iso(latest),
+    }
+    return {"meta": meta, "results": {a.name: a.result() for a in analyzers}}
+
+
+def _iso(timestamp: float) -> str | None:
+    if not math.isfinite(timestamp):
+        return None
+    dt = datetime.fromtimestamp(timestamp, UTC)
+    return dt.isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
 def _build_parser() -> argparse.ArgumentParser:
