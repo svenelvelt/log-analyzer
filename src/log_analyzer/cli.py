@@ -3,6 +3,8 @@ import inspect
 import json
 import logging
 import math
+import os
+import secrets
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
@@ -24,9 +26,31 @@ def main(argv: Sequence[str] | None = None) -> int:
     analyzers = [ANALYZERS[name]() for name in selected]
 
     report = _analyze(args.inputs, PARSERS["squid"], analyzers)
-    args.output.write_text(json.dumps(report, indent=2) + "\n")
+    try:
+        _write_atomic(args.output, json.dumps(report, indent=2) + "\n")
+    except OSError as e:
+        log.error("%s: %s", args.output, e.strerror or e)
+        return 1
     failed = any(f["error"] for f in report["meta"]["files"])
     return 1 if failed else 0
+
+
+def _write_atomic(path: Path, text: str) -> None:
+    """Write to a temp file next to `path`, then rename it over `path`.
+
+    A failure at any point leaves the previous file untouched. Opening with
+    "x" refuses to reuse an existing file or symlink at the temp path.
+    """
+    tmp = path.with_name(f".{path.name}.{secrets.token_hex(4)}.tmp")
+    try:
+        with tmp.open("x", encoding="utf-8") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        tmp.replace(path)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
 
 
 def _analyze(paths: Sequence[Path], parse: Parser, analyzers: list[Analyzer]) -> dict[str, Any]:

@@ -174,3 +174,50 @@ def test_all_inputs_unreadable_still_writes_output(out: Path, tmp_path: Path) ->
 
     assert code == 1
     assert data["meta"]["events"] == 0
+
+
+def test_overwrites_existing_output(log: Path, out: Path) -> None:
+    out.write_text("old")
+
+    code, data = run(out, log, out, "--bytes")
+
+    assert code == 0
+    assert data["results"] == {"bytes": {"total": 500, "unknown": 0}}
+
+
+def test_leaves_no_temp_files(log: Path, out: Path) -> None:
+    run(out, log, out)
+
+    assert sorted(p.name for p in out.parent.iterdir()) == ["access.log", "out.json"]
+
+
+def test_failed_write_keeps_previous_output(
+    log: Path, out: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    out.write_text("old")
+
+    def fail(*_: object) -> None:
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(Path, "replace", fail)
+    code = main([str(log), str(out)])
+
+    assert code == 1
+    assert out.read_text() == "old"
+    assert sorted(p.name for p in out.parent.iterdir()) == ["access.log", "out.json"]
+
+
+def test_output_directory_missing(
+    log: Path, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    out = tmp_path / "nope" / "out.json"
+
+    with caplog.at_level(logging.ERROR, logger="log_analyzer"):
+        code = main([str(log), str(out)])
+
+    assert code == 1
+    assert caplog.messages == [f"{out}: No such file or directory"]
+
+
+def test_output_is_a_directory(log: Path, tmp_path: Path) -> None:
+    assert main([str(log), str(tmp_path)]) == 1
