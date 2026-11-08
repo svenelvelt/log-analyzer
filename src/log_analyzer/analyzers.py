@@ -69,11 +69,12 @@ class EpsResult(TypedDict):
 
 
 class EventsPerSecond:
-    """Average and peak events per second, in constant memory.
+    """Average and peak events per second.
 
     The average is taken over the whole seconds from the earliest to the latest
     event, inclusive. The peak counts consecutive events in the same second, so
-    it assumes input in time order, which is how Squid writes its log.
+    it runs in constant memory but assumes input in time order, which is how
+    Squid writes its log.
     """
 
     name = "eps"
@@ -131,6 +132,12 @@ class TotalBytes:
 
     def result(self) -> BytesResult:
         return {"total": self._total, "unknown": self._unknown}
+
+
+_ALL: tuple[type[Analyzer], ...] = (MostFrequentIp, LeastFrequentIp, EventsPerSecond, TotalBytes)
+
+# Analyzers by name, in the order their results appear in the output.
+ANALYZERS: dict[str, type[Analyzer]] = {cls.name: cls for cls in _ALL}
 
 
 def _address_order(value: str) -> tuple[int, int, int, str]:
