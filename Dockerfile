@@ -1,11 +1,9 @@
 # syntax=docker/dockerfile:1
 
-# Base images are pinned by digest. Builder and runtime share Python 3.13 so the
-# bytecode compiled in the build stage is valid at runtime.
-ARG BUILD_IMAGE=python:3.13-slim-trixie@sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90
-ARG RUNTIME_IMAGE=gcr.io/distroless/python3-debian13:nonroot@sha256:1c32c3720dc4c7f0c7dbe998737f32c200add6511eca7cec705008be488b87d6
-
-FROM ${BUILD_IMAGE} AS build
+# Base images are pinned by digest (Dependabot keeps them current). Builder and
+# runtime share Python 3.13 so the bytecode compiled in the build stage is valid
+# at runtime.
+FROM python:3.13-slim-trixie@sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90 AS build
 
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_NO_CACHE_DIR=1 \
@@ -22,7 +20,7 @@ RUN pip install --no-build-isolation --no-deps --target /app .
 
 
 # Distroless: Python and its runtime libraries only, no shell or package manager.
-FROM ${RUNTIME_IMAGE}
+FROM gcr.io/distroless/python3-debian13:nonroot@sha256:c3ed2b61f3c4e410685565ceb3c818197b552832521b39d53eca5d2d9d0dc1e1
 
 LABEL org.opencontainers.image.title="log-analyzer" \
       org.opencontainers.image.description="Analyze Squid access logs" \
