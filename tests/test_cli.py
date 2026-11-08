@@ -248,3 +248,64 @@ def test_stdout_stays_valid_json_when_input_fails(
 def test_dot_slash_dash_is_a_file(log: Path, tmp_path: Path) -> None:
     assert main([str(log), "./-"]) == 0
     assert (tmp_path / "-").is_file()
+
+
+@pytest.fixture
+def bad_log(tmp_path: Path) -> Path:
+    path = tmp_path / "bad.log"
+    path.write_text(f"{LINES[0]}\ngarbage\n")
+    return path
+
+
+def test_errors_go_to_stderr(log: Path, out: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    missing = log.parent / "missing.log"
+
+    main([str(missing), str(log), str(out)])
+
+    assert capsys.readouterr().err == f"log-analyzer: error: {missing}: No such file or directory\n"
+
+
+def test_skipped_lines_summary_shown_by_default(
+    bad_log: Path, out: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    main([str(bad_log), str(out)])
+
+    assert capsys.readouterr().err == f"log-analyzer: warning: {bad_log}: skipped 1 of 2 lines\n"
+
+
+def test_verbose_shows_each_skipped_line(
+    bad_log: Path, out: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    main([str(bad_log), str(out), "-v"])
+
+    assert capsys.readouterr().err.splitlines() == [
+        f"log-analyzer: debug: {bad_log}:2: expected 10 fields, got 1",
+        f"log-analyzer: warning: {bad_log}: skipped 1 of 2 lines",
+    ]
+
+
+def test_quiet_hides_warnings_but_not_errors(
+    bad_log: Path, out: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    missing = bad_log.parent / "missing.log"
+
+    main([str(missing), str(bad_log), str(out), "-q"])
+
+    assert capsys.readouterr().err == f"log-analyzer: error: {missing}: No such file or directory\n"
+
+
+def test_verbose_and_quiet_together_is_usage_error(log: Path, out: Path) -> None:
+    with pytest.raises(SystemExit) as exc:
+        main([str(log), str(out), "-v", "-q"])
+    assert exc.value.code == 2
+
+
+def test_repeated_runs_do_not_duplicate_log_lines(
+    bad_log: Path, out: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    main([str(bad_log), str(out)])
+    capsys.readouterr()
+
+    main([str(bad_log), str(out)])
+
+    assert len(capsys.readouterr().err.splitlines()) == 1

@@ -22,6 +22,7 @@ log = logging.getLogger(__name__)
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _build_parser().parse_intermixed_args(argv)
+    _configure_logging(args.verbosity)
 
     selected = [name for name in ANALYZERS if getattr(args, name)] or list(ANALYZERS)
     analyzers = [ANALYZERS[name]() for name in selected]
@@ -119,6 +120,25 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("output", metavar="OUTPUT", help="JSON file to write, - for stdout")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
 
+    verbosity = parser.add_mutually_exclusive_group()
+    verbosity.add_argument(
+        "-v",
+        "--verbose",
+        dest="verbosity",
+        action="store_const",
+        const=logging.DEBUG,
+        default=logging.WARNING,
+        help="also log every skipped line",
+    )
+    verbosity.add_argument(
+        "-q",
+        "--quiet",
+        dest="verbosity",
+        action="store_const",
+        const=logging.ERROR,
+        help="only log errors",
+    )
+
     ops = parser.add_argument_group("operations")
     for name, cls in ANALYZERS.items():
         ops.add_argument(f"--{name}", action="store_true", help=_summary(cls))
@@ -128,3 +148,27 @@ def _build_parser() -> argparse.ArgumentParser:
 def _summary(cls: type) -> str:
     doc = inspect.getdoc(cls) or ""
     return doc.split("\n\n")[0].replace("\n", " ")
+
+
+def _configure_logging(level: int) -> None:
+    """Log to stderr as "log-analyzer: <level>: <message>".
+
+    The handler goes on the package logger, not the root logger, so importing
+    log_analyzer as a library leaves the caller's logging alone. It is replaced
+    on every call, so running main() repeatedly doesn't duplicate output.
+    """
+    handler = logging.StreamHandler(sys.stderr)
+    handler.setFormatter(_Formatter())
+
+    logger = logging.getLogger("log_analyzer")
+    for old in logger.handlers[:]:
+        logger.removeHandler(old)
+    logger.addHandler(handler)
+    logger.setLevel(level)
+
+
+class _Formatter(logging.Formatter):
+    # Builds the line instead of lowercasing record.levelname, which other
+    # handlers further up would see too.
+    def format(self, record: logging.LogRecord) -> str:
+        return f"log-analyzer: {record.levelname.lower()}: {record.getMessage()}"
