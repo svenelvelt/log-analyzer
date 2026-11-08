@@ -1,6 +1,89 @@
 # log-analyzer
 
-CLI for analyzing log files. Currently supports Squid access logs.
+CLI for analyzing log files. Currently supports Squid access logs, plain or gzipped.
+
+## Install
+
+Requires Python 3.11 or newer. No third-party runtime dependencies.
+
+```sh
+pip install .            # or: uv tool install .
+log-analyzer --version
+```
+
+## Usage
+
+```
+log-analyzer [-v | -q] [--mfip] [--lfip] [--eps] [--bytes] INPUT [INPUT ...] OUTPUT
+```
+
+| Option            | Result                                                |
+|-------------------|-------------------------------------------------------|
+| `--mfip`          | most frequent client IP(s)                            |
+| `--lfip`          | least frequent client IP(s)                           |
+| `--eps`           | average and peak events per second                    |
+| `--bytes`         | total bytes delivered to clients                      |
+| `-v`, `--verbose` | also log every skipped line                           |
+| `-q`, `--quiet`   | only log errors                                       |
+
+Without any operation flag all of them run. Several inputs are analyzed together, and
+flags can go anywhere on the command line. `OUTPUT` is a JSON file, or `-` for stdout
+(use `./-` for a file actually named `-`). Messages go to stderr, so stdout stays valid
+JSON.
+
+```sh
+curl -O https://www.secrepo.com/squid/access.log.gz
+
+log-analyzer access.log.gz report.json
+log-analyzer access.log.gz - --mfip --eps | jq .results
+log-analyzer access.log access.log.1 access.log.2.gz report.json --bytes
+```
+
+### Output
+
+For the sample file (the `lfip` list is shortened here, it has 30 entries):
+
+```json
+{
+  "meta": {
+    "tool": "log-analyzer 0.1.0",
+    "files": [
+      {"path": "access.log.gz", "lines": 1643520, "events": 1643518, "skipped": 2, "error": null}
+    ],
+    "lines": 1643520,
+    "events": 1643518,
+    "skipped": 2,
+    "first": "2002-10-19T20:30:37.745Z",
+    "last": "2012-05-02T03:18:57.000Z"
+  },
+  "results": {
+    "mfip": {"ips": ["127.0.0.1"], "count": 1422267},
+    "lfip": {"ips": ["10.105.21.138", "10.105.21.178", "..."], "count": 1},
+    "eps": {"average": 0.005462564623700176, "peak": 7952},
+    "bytes": {"total": 2216979451, "unknown": 1001183}
+  }
+}
+```
+
+- `meta.files` lists every input. A file that couldn't be read has its `error` set, and
+  keeps the counts from before the failure.
+- `first` and `last` are the earliest and latest event in UTC.
+- Results always come in the order mfip, lfip, eps, bytes. Why they look the way they do
+  is explained under [Assumptions](#assumptions).
+
+### Exit status
+
+| Code | Meaning                                                                  |
+|------|--------------------------------------------------------------------------|
+| 0    | all inputs read and the output written                                   |
+| 1    | an input couldn't be read, or the output couldn't be written             |
+| 2    | invalid command line                                                     |
+
+If an input fails, the other inputs are still analyzed and the output is still written,
+so a caller gets the partial result together with the reason.
+
+The output file is written to a temporary file next to it and then renamed, so an existing
+report is never left half-written.
 
 ## Development
 
@@ -8,11 +91,25 @@ Requires [uv](https://docs.astral.sh/uv/).
 
 ```sh
 uv sync                 # create .venv, install package and dev tools
-uv run pytest
-uv run ruff check .
+uv run pytest --cov
+uv run ruff check .     # includes the flake8-bandit (S) security rules
 uv run ruff format .
 uv run mypy
 ```
+
+### Adding an operation
+
+Write a class with a `name`, an `update(record)` method that is called once per log
+record, and a `result()` method that returns something JSON-serializable. Then add it to
+`_ALL` in `analyzers.py`. The CLI flag `--<name>` and its help text (the first paragraph
+of the docstring) are generated from that list.
+
+### Adding an input format
+
+Write a function that turns one line into a `LogRecord` or raises `ParseError`, and add it
+to `PARSERS` in `parsers/__init__.py`. Reading, gzip, encoding and error handling are
+shared. The CLI uses the `squid` parser for now; a `--format` option would come with the
+second parser.
 
 ## Assumptions
 
@@ -125,3 +222,13 @@ SIEM sizing usually looks at average and peak EPS, so the result has both:
   all events, including about 348,000 `TCP_MISS/200` responses that did send content, so
   the total is a lower bound.
 - With no valid records the result is `{"total": 0, "unknown": 0}`.
+
+## Sample data
+
+The sample log is from [SecRepo](https://www.secrepo.com/), published under the
+[Creative Commons Attribution 4.0](https://creativecommons.org/licenses/by/4.0/) license.
+It isn't included in this repository.
+
+## License
+
+MIT, see [LICENSE](LICENSE).
