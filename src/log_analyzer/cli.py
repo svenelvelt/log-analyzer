@@ -5,6 +5,7 @@ import logging
 import math
 import os
 import secrets
+import sys
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
@@ -26,8 +27,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     analyzers = [ANALYZERS[name]() for name in selected]
 
     report = _analyze(args.inputs, PARSERS["squid"], analyzers)
+    text = json.dumps(report, indent=2) + "\n"
     try:
-        _write_atomic(args.output, json.dumps(report, indent=2) + "\n")
+        if args.output == "-":
+            sys.stdout.write(text)
+        else:
+            _write_atomic(Path(args.output), text)
     except OSError as e:
         log.error("%s: %s", args.output, e.strerror or e)
         return 1
@@ -110,7 +115,8 @@ def _build_parser() -> argparse.ArgumentParser:
         description="Analyze Squid access logs. Runs all operations if none is selected.",
     )
     parser.add_argument("inputs", nargs="+", type=Path, metavar="INPUT", help="log file(s)")
-    parser.add_argument("output", type=Path, metavar="OUTPUT", help="JSON file to write")
+    # Kept as str: Path("./-") would normalize to "-" and make a file named "-" unreachable.
+    parser.add_argument("output", metavar="OUTPUT", help="JSON file to write, - for stdout")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
 
     ops = parser.add_argument_group("operations")

@@ -16,6 +16,12 @@ LINES = [
 ]
 
 
+@pytest.fixture(autouse=True)
+def _in_tmp_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # Relative output paths, intended or not, land in tmp_path instead of the repo.
+    monkeypatch.chdir(tmp_path)
+
+
 @pytest.fixture
 def log(tmp_path: Path) -> Path:
     path = tmp_path / "access.log"
@@ -221,3 +227,24 @@ def test_output_directory_missing(
 
 def test_output_is_a_directory(log: Path, tmp_path: Path) -> None:
     assert main([str(log), str(tmp_path)]) == 1
+
+
+def test_dash_writes_to_stdout(log: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    code = main([str(log), "-", "--bytes"])
+
+    assert code == 0
+    assert json.loads(capsys.readouterr().out)["results"] == {"bytes": {"total": 500, "unknown": 0}}
+
+
+def test_stdout_stays_valid_json_when_input_fails(
+    log: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    code = main([str(log.parent / "missing.log"), str(log), "-"])
+
+    assert code == 1
+    assert json.loads(capsys.readouterr().out)["meta"]["events"] == 3
+
+
+def test_dot_slash_dash_is_a_file(log: Path, tmp_path: Path) -> None:
+    assert main([str(log), "./-"]) == 0
+    assert (tmp_path / "-").is_file()
