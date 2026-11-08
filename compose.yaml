@@ -1,0 +1,25 @@
+# One-off analysis of the logs in ./data, report written to ./reports:
+#
+#   mkdir -p reports
+#   HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm log-analyzer
+#
+# Other arguments replace the default command:
+#
+#   docker compose run --rm log-analyzer /logs/access.log.gz - --mfip
+
+services:
+  log-analyzer:
+    build: .
+    image: log-analyzer:local
+    command: ["/logs/access.log.gz", "report.json"]
+    # Run as the host user so the report in ./reports belongs to you.
+    user: "${HOST_UID:-65532}:${HOST_GID:-65532}"
+    volumes:
+      - ./data:/logs:ro
+      - ./reports:/data
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    network_mode: none
+    mem_limit: 128m
+    pids_limit: 32

@@ -22,3 +22,6 @@ data/
 # Editors
 .vscode/
 .idea/
+
+# Reports written by compose.yaml
+reports/

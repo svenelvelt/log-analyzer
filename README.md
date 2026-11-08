@@ -85,6 +85,66 @@ so a caller gets the partial result together with the reason.
 The output file is written to a temporary file next to it and then renamed, so an existing
 report is never left half-written.
 
+## Docker
+
+```sh
+docker build -t log-analyzer .
+```
+
+The image is a multi-stage build on
+[distroless](https://github.com/GoogleContainerTools/distroless) Python (Debian 13,
+Python 3.13): no shell, no package manager, about 90 MB, running as the unprivileged user
+65532. Base images are pinned by digest, and the build backend is installed from
+[build-requirements.txt](build-requirements.txt) with hash checking. Only the package
+itself ends up in the runtime image.
+
+The simplest way to run it is with the logs mounted read-only and the report on stdout:
+
+```sh
+docker run --rm --read-only --cap-drop ALL --security-opt no-new-privileges --network none \
+  -v "$PWD:/data:ro" log-analyzer access.log.gz - > report.json
+```
+
+The extra flags aren't needed for it to work, but it doesn't need any more than that: no
+network, no capabilities, nothing written inside the container.
+
+To write the report into a mounted directory instead, run as your own user so the
+container can write there and the file belongs to you:
+
+```sh
+docker run --rm --read-only --cap-drop ALL --security-opt no-new-privileges --network none \
+  --user "$(id -u):$(id -g)" -v "$PWD/logs:/logs:ro" -v "$PWD/reports:/data" \
+  log-analyzer /logs/access.log.gz report.json
+```
+
+### Docker Compose
+
+[compose.yaml](compose.yaml) has the same settings, plus memory and process limits. It
+analyzes `./data/access.log.gz` into `./reports/report.json`:
+
+```sh
+mkdir -p reports
+HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm log-analyzer
+```
+
+### Kubernetes
+
+The tool is a batch job, so as a service it runs on a schedule.
+[deploy/k8s/cronjob.yaml](deploy/k8s/cronjob.yaml) is a CronJob that analyzes the proxy's
+current and rotated log every night at 00:15 UTC and writes the report to a volume. It
+runs non-root with a read-only root filesystem, no capabilities, the default seccomp
+profile, no service account token and a NetworkPolicy that blocks all traffic. A run over
+the 1.6 million lines of the sample peaks at about 35 MiB, so the limits are 128 MiB and
+one CPU.
+
+```sh
+kubectl apply -n <namespace> -f deploy/k8s/cronjob.yaml
+kubectl create job -n <namespace> --from=cronjob/log-analyzer log-analyzer-now   # run once now
+```
+
+It expects the PersistentVolumeClaims `squid-logs` and `log-analyzer-reports`, and the
+image in a registry the cluster can pull from.
+
 ## Development
 
 Requires [uv](https://docs.astral.sh/uv/).

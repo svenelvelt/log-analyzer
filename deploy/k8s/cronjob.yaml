@@ -1,0 +1,76 @@
+# Daily analysis of the Squid logs on a shared volume.
+#
+# Expects two PersistentVolumeClaims in the same namespace: squid-logs (the proxy's log
+# directory) and log-analyzer-reports. In production, pin the image by digest.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: log-analyzer
+  labels:
+    app.kubernetes.io/name: log-analyzer
+spec:
+  schedule: "15 0 * * *"
+  timeZone: Etc/UTC
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 1800
+      ttlSecondsAfterFinished: 604800
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: log-analyzer
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            fsGroup: 65532
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: log-analyzer
+              image: ghcr.io/svenelvelt/log-analyzer:0.1.0
+              args: ["/logs/access.log", "/logs/access.log.1", "/reports/report.json"]
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 64Mi
+                limits:
+                  cpu: "1"
+                  memory: 128Mi
+              volumeMounts:
+                - name: logs
+                  mountPath: /logs
+                  readOnly: true
+                - name: reports
+                  mountPath: /reports
+          volumes:
+            - name: logs
+              persistentVolumeClaim:
+                claimName: squid-logs
+                readOnly: true
+            - name: reports
+              persistentVolumeClaim:
+                claimName: log-analyzer-reports
+---
+# The job only reads and writes volumes, so it gets no network at all.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: log-analyzer-deny-all
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: log-analyzer
+  policyTypes: [Ingress, Egress]
