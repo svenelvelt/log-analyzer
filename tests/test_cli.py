@@ -320,3 +320,26 @@ def test_line_with_out_of_range_timestamp_is_skipped(out: Path, tmp_path: Path) 
 
     assert code == 0
     assert (data["meta"]["events"], data["meta"]["skipped"]) == (1, 1)
+
+
+def test_output_same_as_input_is_refused(log: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    before = log.read_text()
+
+    with pytest.raises(SystemExit) as exc:
+        main([str(log), str(log)])
+
+    assert exc.value.code == 2
+    assert log.read_text() == before
+    assert f"output {log} is also an input" in capsys.readouterr().err
+
+
+def test_output_linked_to_input_is_refused(log: Path, tmp_path: Path) -> None:
+    link = tmp_path / "report.json"
+    link.symlink_to(log)
+    before = log.read_text()
+
+    with pytest.raises(SystemExit) as exc:
+        main([str(log), str(link)])
+
+    assert exc.value.code == 2
+    assert log.read_text() == before

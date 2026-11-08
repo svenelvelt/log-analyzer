@@ -21,7 +21,10 @@ log = logging.getLogger(__name__)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    args = _build_parser().parse_intermixed_args(argv)
+    parser = _build_parser()
+    args = parser.parse_intermixed_args(argv)
+    if args.output != "-" and any(_same_file(Path(args.output), p) for p in args.inputs):
+        parser.error(f"output {args.output} is also an input")
     _configure_logging(args.verbosity)
 
     selected = [name for name in ANALYZERS if getattr(args, name)] or list(ANALYZERS)
@@ -39,6 +42,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 1
     failed = any(f["error"] for f in report["meta"]["files"])
     return 1 if failed else 0
+
+
+def _same_file(a: Path, b: Path) -> bool:
+    """True if both paths exist and are the same file, also through links."""
+    try:
+        return a.samefile(b)
+    except OSError:
+        return False
 
 
 def _write_atomic(path: Path, text: str) -> None:

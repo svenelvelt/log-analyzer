@@ -28,8 +28,8 @@ log-analyzer [-v | -q] [--mfip] [--lfip] [--eps] [--bytes] INPUT [INPUT ...] OUT
 
 Without any operation flag all of them run. Several inputs are analyzed together, and
 flags can go anywhere on the command line. `OUTPUT` is a JSON file, or `-` for stdout
-(use `./-` for a file actually named `-`). Messages go to stderr, so stdout stays valid
-JSON.
+(use `./-` for a file actually named `-`). It can't be one of the inputs, so a mixed-up
+command line can't overwrite a log. Messages go to stderr, so stdout stays valid JSON.
 
 ```sh
 curl -O https://www.secrepo.com/squid/access.log.gz
