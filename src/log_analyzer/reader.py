@@ -55,7 +55,9 @@ def read_records(
                 stats.records += 1
                 yield record
     except (OSError, EOFError, zlib.error) as e:
-        raise InputError(f"{path}: {e}") from e
+        # strerror leaves out the path, which OSError's str() repeats
+        reason = e.strerror if isinstance(e, OSError) and e.strerror else str(e)
+        raise InputError(path, reason) from e
 
     if stats.skipped:
         log.warning("%s: skipped %d of %d lines", path, stats.skipped, stats.lines)

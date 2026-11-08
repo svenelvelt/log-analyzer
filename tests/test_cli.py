@@ -1,4 +1,6 @@
+import gzip
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -101,8 +103,8 @@ def test_meta_files_and_totals(log: Path, out: Path) -> None:
     meta = data["meta"]
 
     assert meta["files"] == [
-        {"path": str(log), "lines": 3, "events": 3, "skipped": 0},
-        {"path": str(other), "lines": 2, "events": 1, "skipped": 1},
+        {"path": str(log), "lines": 3, "events": 3, "skipped": 0, "error": None},
+        {"path": str(other), "lines": 2, "events": 1, "skipped": 1, "error": None},
     ]
     assert (meta["lines"], meta["events"], meta["skipped"]) == (5, 4, 1)
 
@@ -123,3 +125,52 @@ def test_meta_time_range_without_events(out: Path, tmp_path: Path) -> None:
     meta = data["meta"]
 
     assert (meta["first"], meta["last"]) == (None, None)
+
+
+def test_unreadable_input_is_reported_and_others_still_analyzed(log: Path, out: Path) -> None:
+    missing = log.parent / "missing.log"
+
+    code, data = run(out, missing, log, out, "--mfip")
+
+    assert code == 1
+    assert data["meta"]["files"] == [
+        {
+            "path": str(missing),
+            "lines": 0,
+            "events": 0,
+            "skipped": 0,
+            "error": "No such file or directory",
+        },
+        {"path": str(log), "lines": 3, "events": 3, "skipped": 0, "error": None},
+    ]
+    assert data["results"] == {"mfip": {"ips": ["10.0.0.1"], "count": 2}}
+
+
+def test_unreadable_input_is_logged(log: Path, out: Path, caplog: pytest.LogCaptureFixture) -> None:
+    missing = log.parent / "missing.log"
+
+    with caplog.at_level(logging.ERROR, logger="log_analyzer"):
+        run(out, missing, log, out)
+
+    assert caplog.messages == [f"{missing}: No such file or directory"]
+
+
+def test_truncated_gzip_keeps_partial_counts(out: Path, tmp_path: Path) -> None:
+    path = tmp_path / "access.log.gz"
+    data = gzip.compress(("\n".join(LINES * 500) + "\n").encode())
+    path.write_bytes(data[: len(data) // 2])
+
+    code, report = run(out, path, out, "--bytes")
+    [entry] = report["meta"]["files"]
+
+    assert code == 1
+    assert entry["error"] == "Compressed file ended before the end-of-stream marker was reached"
+    assert 0 < entry["events"] < 1500
+    assert report["meta"]["events"] == entry["events"]
+
+
+def test_all_inputs_unreadable_still_writes_output(out: Path, tmp_path: Path) -> None:
+    code, data = run(out, tmp_path / "nope.log", out)
+
+    assert code == 1
+    assert data["meta"]["events"] == 0

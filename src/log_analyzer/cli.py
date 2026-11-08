@@ -1,6 +1,7 @@
 import argparse
 import inspect
 import json
+import logging
 import math
 from collections.abc import Sequence
 from datetime import UTC, datetime
@@ -9,8 +10,11 @@ from typing import Any
 
 from log_analyzer import __version__
 from log_analyzer.analyzers import ANALYZERS, Analyzer
+from log_analyzer.errors import InputError
 from log_analyzer.parsers import PARSERS
 from log_analyzer.reader import Parser, ReadStats, read_records
+
+log = logging.getLogger(__name__)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -21,32 +25,48 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     report = _analyze(args.inputs, PARSERS["squid"], analyzers)
     args.output.write_text(json.dumps(report, indent=2) + "\n")
-    return 0
+    failed = any(f["error"] for f in report["meta"]["files"])
+    return 1 if failed else 0
 
 
 def _analyze(paths: Sequence[Path], parse: Parser, analyzers: list[Analyzer]) -> dict[str, Any]:
-    """Read every file once, feeding each record to all analyzers."""
-    read: list[tuple[Path, ReadStats]] = []
+    """Read every file once, feeding each record to all analyzers.
+
+    A file that can't be read is logged and recorded with its error. Records
+    read before the error (e.g. from a truncated gzip) stay in the results.
+    """
+    read: list[tuple[Path, ReadStats, str | None]] = []
     earliest, latest = math.inf, -math.inf
 
     for path in paths:
         stats = ReadStats()
-        for record in read_records(path, parse, stats):
-            earliest = min(earliest, record.timestamp)
-            latest = max(latest, record.timestamp)
-            for analyzer in analyzers:
-                analyzer.update(record)
-        read.append((path, stats))
+        error = None
+        try:
+            for record in read_records(path, parse, stats):
+                earliest = min(earliest, record.timestamp)
+                latest = max(latest, record.timestamp)
+                for analyzer in analyzers:
+                    analyzer.update(record)
+        except InputError as e:
+            log.error("%s", e)
+            error = e.reason
+        read.append((path, stats, error))
 
     meta = {
         "tool": f"log-analyzer {__version__}",
         "files": [
-            {"path": str(p), "lines": s.lines, "events": s.records, "skipped": s.skipped}
-            for p, s in read
+            {
+                "path": str(p),
+                "lines": s.lines,
+                "events": s.records,
+                "skipped": s.skipped,
+                "error": err,
+            }
+            for p, s, err in read
         ],
-        "lines": sum(s.lines for _, s in read),
-        "events": sum(s.records for _, s in read),
-        "skipped": sum(s.skipped for _, s in read),
+        "lines": sum(s.lines for _, s, _ in read),
+        "events": sum(s.records for _, s, _ in read),
+        "skipped": sum(s.skipped for _, s, _ in read),
         "first": _iso(earliest),
         "last": _iso(latest),
     }
