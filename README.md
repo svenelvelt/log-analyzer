@@ -220,6 +220,13 @@ to `PARSERS` in `parsers/__init__.py`. Reading, gzip, encoding, the timestamp ra
 and error handling are shared. The CLI uses the `squid` parser for now; a `--format` option would come with the
 second parser.
 
+### Adding an output format
+
+Write a function that takes the report (the `meta` and `results` dictionary shown under
+[Output](#output)) and returns the text to write, and add it to `FORMATTERS` in
+`formatters.py`. Writing to a file or stdout, including the atomic replace, stays in the
+CLI. JSON is the only format so far, so there's no option to choose one yet.
+
 ## Assumptions
 
 ### Input format

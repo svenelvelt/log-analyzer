@@ -1,6 +1,5 @@
 import argparse
 import inspect
-import json
 import logging
 import math
 import os
@@ -14,6 +13,7 @@ from typing import Any
 from log_analyzer import __version__
 from log_analyzer.analyzers import ANALYZERS, Analyzer
 from log_analyzer.errors import InputError
+from log_analyzer.formatters import FORMATTERS
 from log_analyzer.parsers import PARSERS
 from log_analyzer.reader import Parser, ReadStats, read_records
 
@@ -31,7 +31,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     analyzers = [ANALYZERS[name]() for name in selected]
 
     report = _analyze(args.inputs, PARSERS["squid"], analyzers)
-    text = json.dumps(report, indent=2) + "\n"
+    text = FORMATTERS["json"](report)
     try:
         if args.output == "-":
             sys.stdout.write(text)
