@@ -309,3 +309,14 @@ def test_repeated_runs_do_not_duplicate_log_lines(
     main([str(bad_log), str(out)])
 
     assert len(capsys.readouterr().err.splitlines()) == 1
+
+
+def test_line_with_out_of_range_timestamp_is_skipped(out: Path, tmp_path: Path) -> None:
+    path = tmp_path / "access.log"
+    huge = LINES[0].replace("1157689324.156", "99999999999999999999.0")
+    path.write_text(f"{LINES[0]}\n{huge}\n")
+
+    code, data = run(out, path, out)
+
+    assert code == 0
+    assert (data["meta"]["events"], data["meta"]["skipped"]) == (1, 1)

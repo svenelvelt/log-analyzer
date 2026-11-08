@@ -48,6 +48,11 @@ def test_minus_one_size_means_unknown() -> None:
     assert record.timestamp == 1335542309.0
 
 
+def test_accepts_last_representable_timestamp() -> None:
+    # 9999-12-31T23:59:59Z, the latest time a datetime can hold
+    assert parse_line(SAMPLE.replace("1157689324.156", "253402300799")).timestamp == 253402300799
+
+
 def test_minus_one_elapsed_means_unknown() -> None:
     assert parse_line(SAMPLE.replace(" 1372 ", " -1 ")).elapsed_ms is None
 
@@ -70,6 +75,9 @@ def test_minus_one_elapsed_means_unknown() -> None:
         pytest.param(SAMPLE.replace("1157689324.156", "yesterday"), "timestamp", id="bad-ts"),
         pytest.param(SAMPLE.replace("1157689324.156", "nan"), "timestamp", id="nan-ts"),
         pytest.param(SAMPLE.replace("1157689324.156", "-5.0"), "timestamp", id="negative-ts"),
+        pytest.param(
+            SAMPLE.replace("1157689324.156", "99999999999999999999.0"), "timestamp", id="huge-ts"
+        ),
         pytest.param(SAMPLE.replace(" 1372 ", " fast "), "elapsed", id="bad-elapsed"),
         pytest.param(SAMPLE.replace(" 1372 ", " -3 "), "elapsed", id="negative-elapsed"),
         pytest.param(SAMPLE.replace(" 399 ", " big "), "response size", id="bad-size"),
