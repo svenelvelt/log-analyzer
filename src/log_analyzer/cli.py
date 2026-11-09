@@ -1,11 +1,12 @@
 import argparse
 import inspect
+import io
 import logging
 import math
 import os
 import secrets
 import sys
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -14,8 +15,9 @@ from log_analyzer import __version__
 from log_analyzer.analyzers import ANALYZERS, Analyzer
 from log_analyzer.errors import InputError
 from log_analyzer.formatters import FORMATTERS
+from log_analyzer.models import LogRecord
 from log_analyzer.parsers import PARSERS
-from log_analyzer.reader import Parser, ReadStats, read_records
+from log_analyzer.reader import Parser, ReadStats, read_records, read_stream
 
 log = logging.getLogger(__name__)
 
@@ -23,7 +25,10 @@ log = logging.getLogger(__name__)
 def main(argv: Sequence[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_intermixed_args(argv)
-    if args.output != "-" and any(_same_file(Path(args.output), p) for p in args.inputs):
+    if args.inputs.count("-") > 1:
+        parser.error("stdin (-) can only be read once")
+    files = [Path(i) for i in args.inputs if i != "-"]
+    if args.output != "-" and any(_same_file(Path(args.output), f) for f in files):
         parser.error(f"output {args.output} is also an input")
     _configure_logging(args.verbosity)
 
@@ -70,20 +75,26 @@ def _write_atomic(path: Path, text: str) -> None:
         raise
 
 
-def _analyze(paths: Sequence[Path], parse: Parser, analyzers: list[Analyzer]) -> dict[str, Any]:
-    """Read every file once, feeding each record to all analyzers.
+def _analyze(inputs: Sequence[str], parse: Parser, analyzers: list[Analyzer]) -> dict[str, Any]:
+    """Read every input once, feeding each record to all analyzers. "-" is stdin.
 
-    A file that can't be read is logged and recorded with its error. Records
+    An input that can't be read is logged and recorded with its error. Records
     read before the error (e.g. from a truncated gzip) stay in the results.
     """
-    read: list[tuple[Path, ReadStats, str | None]] = []
+    read: list[tuple[str, ReadStats, str | None]] = []
     earliest, latest = math.inf, -math.inf
 
-    for path in paths:
+    for source in inputs:
         stats = ReadStats()
         error = None
+        if source == "-":
+            name = "<stdin>"
+            records = _read_stdin(parse, stats)
+        else:
+            name = str(Path(source))
+            records = read_records(Path(source), parse, stats)
         try:
-            for record in read_records(path, parse, stats):
+            for record in records:
                 earliest = min(earliest, record.timestamp)
                 latest = max(latest, record.timestamp)
                 for analyzer in analyzers:
@@ -91,19 +102,19 @@ def _analyze(paths: Sequence[Path], parse: Parser, analyzers: list[Analyzer]) ->
         except InputError as e:
             log.error("%s", e)
             error = e.reason
-        read.append((path, stats, error))
+        read.append((name, stats, error))
 
     meta = {
         "tool": f"log-analyzer {__version__}",
         "files": [
             {
-                "path": str(p),
+                "path": name,
                 "lines": s.lines,
                 "events": s.records,
                 "skipped": s.skipped,
                 "error": err,
             }
-            for p, s, err in read
+            for name, s, err in read
         ],
         "lines": sum(s.lines for _, s, _ in read),
         "events": sum(s.records for _, s, _ in read),
@@ -112,6 +123,16 @@ def _analyze(paths: Sequence[Path], parse: Parser, analyzers: list[Analyzer]) ->
         "last": _iso(latest),
     }
     return {"meta": meta, "results": {a.name: a.result() for a in analyzers}}
+
+
+def _read_stdin(parse: Parser, stats: ReadStats) -> Iterator[LogRecord]:
+    # Normally a BufferedReader, but stdin can be closed (None) or replaced by an
+    # object without a byte buffer. As a generator, this raises inside the caller's
+    # loop, where InputError is reported like any other unreadable input.
+    stdin = getattr(sys.stdin, "buffer", None)
+    if not isinstance(stdin, io.BufferedReader):
+        raise InputError("<stdin>", "stdin is not readable")
+    yield from read_stream(stdin, "<stdin>", parse, stats)
 
 
 def _iso(timestamp: float) -> str | None:
@@ -126,7 +147,8 @@ def _build_parser() -> argparse.ArgumentParser:
         prog="log-analyzer",
         description="Analyze Squid access logs. Runs all operations if none is selected.",
     )
-    parser.add_argument("inputs", nargs="+", type=Path, metavar="INPUT", help="log file(s)")
+    # Kept as str for the same reason as OUTPUT below.
+    parser.add_argument("inputs", nargs="+", metavar="INPUT", help="log file(s), - for stdin")
     # Kept as str: Path("./-") would normalize to "-" and make a file named "-" unreachable.
     parser.add_argument("output", metavar="OUTPUT", help="JSON file to write, - for stdout")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")

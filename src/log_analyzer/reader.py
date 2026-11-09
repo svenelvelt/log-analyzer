@@ -1,5 +1,6 @@
-"""Stream parsed records from plain or gzip-compressed log files."""
+"""Stream parsed records from plain or gzip-compressed log files and streams."""
 
+import contextlib
 import gzip
 import io
 import logging
@@ -36,46 +37,68 @@ def read_records(
     stats: ReadStats,
     max_line_bytes: int = MAX_LINE_BYTES,
 ) -> Iterator[LogRecord]:
-    """Yield a record for every valid line in `path`, updating `stats` as it goes.
+    """Yield a record for every valid line in the file at `path`. See read_stream."""
+    try:
+        f = path.open("rb")
+    except OSError as e:
+        raise InputError(str(path), _reason(e)) from e
+    with f:
+        yield from read_stream(f, str(path), parse, stats, max_line_bytes)
 
-    Malformed lines are skipped. Each one is logged at DEBUG, with a WARNING
-    summary per file. Invalid UTF-8 is replaced with U+FFFD.
 
-    Raises InputError if the file can't be opened or decompressed. Records
+def read_stream(
+    stream: io.BufferedReader,
+    name: str,
+    parse: Parser,
+    stats: ReadStats,
+    max_line_bytes: int = MAX_LINE_BYTES,
+) -> Iterator[LogRecord]:
+    """Yield a record for every valid line in `stream`, updating `stats` as it goes.
+
+    The stream may be plain or gzip-compressed, and is left open, so stdin works
+    too. `name` identifies it in messages. Malformed lines are skipped; each one
+    is logged at DEBUG, with a WARNING summary per stream. Invalid UTF-8 is
+    replaced with U+FFFD.
+
+    Raises InputError if the stream can't be read or decompressed. Records
     yielded before the error (e.g. from a truncated gzip) stay counted.
     """
     try:
-        with _open(path) as f:
-            for lineno, line in enumerate(_bounded_lines(f, max_line_bytes), 1):
-                stats.lines += 1
-                try:
-                    if line is None:
-                        raise ParseError(f"line longer than {max_line_bytes} bytes")
-                    record = parse(line.decode("utf-8", errors="replace"))
-                    if not 0 <= record.timestamp <= MAX_TIMESTAMP:
-                        raise ParseError(f"timestamp {record.timestamp:g} out of range")
-                except ParseError as e:
-                    stats.skipped += 1
-                    log.debug("%s:%d: %s", path, lineno, e)
-                    continue
-                stats.records += 1
-                yield record
+        with contextlib.ExitStack() as stack:
+            f: io.BufferedIOBase = stream
+            # peek doesn't consume, which matters for pipes that can't seek back
+            if stream.peek(2)[:2] == GZIP_MAGIC:
+                f = stack.enter_context(gzip.GzipFile(fileobj=stream))
+            yield from _parse_lines(f, name, parse, stats, max_line_bytes)
     except (OSError, EOFError, zlib.error) as e:
-        # strerror leaves out the path, which OSError's str() repeats
-        reason = e.strerror if isinstance(e, OSError) and e.strerror else str(e)
-        raise InputError(path, reason) from e
+        raise InputError(name, _reason(e)) from e
 
     if stats.skipped:
-        log.warning("%s: skipped %d of %d lines", path, stats.skipped, stats.lines)
+        log.warning("%s: skipped %d of %d lines", name, stats.skipped, stats.lines)
 
 
-def _open(path: Path) -> io.BufferedIOBase:
-    """Open `path` for binary reading, decompressing if it starts with the gzip magic bytes."""
-    with path.open("rb") as f:
-        is_gzip = f.read(2) == GZIP_MAGIC
-    if is_gzip:
-        return gzip.open(path, "rb")
-    return path.open("rb")
+def _parse_lines(
+    f: io.BufferedIOBase, name: str, parse: Parser, stats: ReadStats, max_line_bytes: int
+) -> Iterator[LogRecord]:
+    for lineno, line in enumerate(_bounded_lines(f, max_line_bytes), 1):
+        stats.lines += 1
+        try:
+            if line is None:
+                raise ParseError(f"line longer than {max_line_bytes} bytes")
+            record = parse(line.decode("utf-8", errors="replace"))
+            if not 0 <= record.timestamp <= MAX_TIMESTAMP:
+                raise ParseError(f"timestamp {record.timestamp:g} out of range")
+        except ParseError as e:
+            stats.skipped += 1
+            log.debug("%s:%d: %s", name, lineno, e)
+            continue
+        stats.records += 1
+        yield record
+
+
+def _reason(e: BaseException) -> str:
+    # strerror leaves out the path, which OSError's str() repeats
+    return e.strerror if isinstance(e, OSError) and e.strerror else str(e)
 
 
 def _bounded_lines(f: io.BufferedIOBase, max_bytes: int) -> Iterator[bytes | None]:

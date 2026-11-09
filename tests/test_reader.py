@@ -1,4 +1,5 @@
 import gzip
+import io
 import logging
 import re
 from pathlib import Path
@@ -8,7 +9,13 @@ import pytest
 from log_analyzer.errors import InputError
 from log_analyzer.models import LogRecord
 from log_analyzer.parsers.squid import parse_line
-from log_analyzer.reader import MAX_LINE_BYTES, MAX_TIMESTAMP, ReadStats, read_records
+from log_analyzer.reader import (
+    MAX_LINE_BYTES,
+    MAX_TIMESTAMP,
+    ReadStats,
+    read_records,
+    read_stream,
+)
 
 
 def squid_line(ip: str = "10.0.0.1", url: str = "http://example.com/") -> str:
@@ -237,3 +244,41 @@ def test_skips_timestamps_outside_1970_to_9999_for_any_parser(
     assert [r.timestamp for r in records] == [0, 1157689324.5, MAX_TIMESTAMP]
     assert stats == ReadStats(lines=5, records=3, skipped=2)
     assert f"{path}:4: timestamp 1e+20 out of range" in caplog.messages
+
+
+def stream_of(data: bytes) -> io.BufferedReader:
+    # like sys.stdin.buffer: buffered, and not seekable once wrapped around a pipe
+    return io.BufferedReader(io.BytesIO(data))
+
+
+def test_reads_stream(caplog: pytest.LogCaptureFixture) -> None:
+    stream = stream_of(f"{squid_line('10.0.0.1')}\ngarbage\n".encode())
+    stats = ReadStats()
+
+    with caplog.at_level(logging.WARNING, logger="log_analyzer"):
+        records = list(read_stream(stream, "<stdin>", parse_line, stats))
+
+    assert [r.client_ip for r in records] == ["10.0.0.1"]
+    assert stats == ReadStats(lines=2, records=1, skipped=1)
+    assert caplog.messages == ["<stdin>: skipped 1 of 2 lines"]
+
+
+def test_reads_gzip_stream() -> None:
+    stream = stream_of(gzip.compress(f"{squid_line()}\n".encode()))
+
+    assert len(list(read_stream(stream, "<stdin>", parse_line, ReadStats()))) == 1
+
+
+def test_leaves_stream_open() -> None:
+    stream = stream_of(f"{squid_line()}\n".encode())
+
+    list(read_stream(stream, "<stdin>", parse_line, ReadStats()))
+
+    assert not stream.closed
+
+
+def test_corrupt_gzip_stream() -> None:
+    stream = stream_of(b"\x1f\x8bnot really gzip")
+
+    with pytest.raises(InputError, match="<stdin>"):
+        list(read_stream(stream, "<stdin>", parse_line, ReadStats()))

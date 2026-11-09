@@ -1,6 +1,8 @@
 import gzip
+import io
 import json
 import logging
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -343,3 +345,65 @@ def test_output_linked_to_input_is_refused(log: Path, tmp_path: Path) -> None:
 
     assert exc.value.code == 2
     assert log.read_text() == before
+
+
+def feed_stdin(monkeypatch: pytest.MonkeyPatch, data: bytes) -> None:
+    monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(io.BufferedReader(io.BytesIO(data))))
+
+
+def test_dash_reads_stdin(monkeypatch: pytest.MonkeyPatch, out: Path) -> None:
+    feed_stdin(monkeypatch, ("\n".join(LINES) + "\n").encode())
+
+    code, data = run(out, "-", out, "--mfip")
+
+    assert code == 0
+    assert data["meta"]["files"] == [
+        {"path": "<stdin>", "lines": 3, "events": 3, "skipped": 0, "error": None}
+    ]
+    assert data["results"] == {"mfip": {"ips": ["10.0.0.1"], "count": 2}}
+
+
+def test_dash_reads_gzip_from_stdin(monkeypatch: pytest.MonkeyPatch, out: Path) -> None:
+    feed_stdin(monkeypatch, gzip.compress(("\n".join(LINES) + "\n").encode()))
+
+    _, data = run(out, "-", out, "--bytes")
+
+    assert data["results"] == {"bytes": {"total": 500, "unknown": 0}}
+
+
+def test_stdin_and_files_together(monkeypatch: pytest.MonkeyPatch, log: Path, out: Path) -> None:
+    feed_stdin(monkeypatch, (LINES[1] + "\n").encode())
+
+    _, data = run(out, log, "-", out, "--mfip")
+
+    assert [f["path"] for f in data["meta"]["files"]] == [str(log), "<stdin>"]
+    assert data["results"] == {"mfip": {"ips": ["10.0.0.1", "10.0.0.2"], "count": 2}}
+
+
+def test_stdin_twice_is_usage_error(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as exc:
+        main(["-", "-", "out.json"])
+
+    assert exc.value.code == 2
+    assert "stdin (-) can only be read once" in capsys.readouterr().err
+
+
+def test_dot_slash_dash_input_is_a_file(tmp_path: Path, out: Path) -> None:
+    (tmp_path / "-").write_text(LINES[0] + "\n")
+
+    _, data = run(out, "./-", out, "--mfip")
+
+    assert data["meta"]["files"][0]["path"] == "-"
+    assert data["results"] == {"mfip": {"ips": ["10.0.0.1"], "count": 1}}
+
+
+@pytest.mark.parametrize("stdin", [None, io.StringIO("text only")], ids=["closed", "no-buffer"])
+def test_unusable_stdin_is_an_input_error(
+    monkeypatch: pytest.MonkeyPatch, out: Path, stdin: object
+) -> None:
+    monkeypatch.setattr(sys, "stdin", stdin)
+
+    code, data = run(out, "-", out)
+
+    assert code == 1
+    assert data["meta"]["files"][0]["error"] == "stdin is not readable"

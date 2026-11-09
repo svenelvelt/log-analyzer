@@ -27,7 +27,8 @@ log-analyzer [-v | -q] [--mfip] [--lfip] [--eps] [--bytes] INPUT [INPUT ...] OUT
 | `-q`, `--quiet`   | only log errors                                       |
 
 Without any operation flag all of them run. Several inputs are analyzed together, and
-flags can go anywhere on the command line. `OUTPUT` is a JSON file, or `-` for stdout
+flags can go anywhere on the command line. An `INPUT` of `-` reads stdin, plain or gzipped.
+`OUTPUT` is a JSON file, or `-` for stdout
 (use `./-` for a file actually named `-`). It can't be one of the inputs, so a mixed-up
 command line can't overwrite a log. Messages go to stderr, so stdout stays valid JSON.
 
@@ -37,6 +38,7 @@ curl -O https://www.secrepo.com/squid/access.log.gz
 log-analyzer access.log.gz report.json
 log-analyzer access.log.gz - --mfip --eps | jq .results
 log-analyzer access.log access.log.1 access.log.2.gz report.json --bytes
+ssh proxy cat /var/log/squid/access.log | log-analyzer - report.json
 ```
 
 ### Output
@@ -106,7 +108,13 @@ docker run --rm --read-only --cap-drop ALL --security-opt no-new-privileges --ne
 ```
 
 The extra flags aren't needed for it to work, but it doesn't need any more than that: no
-network, no capabilities, nothing written inside the container.
+network, no capabilities, nothing written inside the container. With `-i` it can read the
+log from stdin instead, without any mount:
+
+```sh
+docker run --rm -i --read-only --cap-drop ALL --security-opt no-new-privileges \
+  --network none log-analyzer - - < access.log.gz > report.json
+```
 
 To write the report into a mounted directory instead, run as your own user so the
 container can write there and the file belongs to you:
