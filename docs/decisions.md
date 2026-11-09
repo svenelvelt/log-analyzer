@@ -153,6 +153,9 @@ SIEM sizing usually looks at average and peak EPS, so the result has both:
 - That's the only byte count in the native format. Squid can log the full traffic in both
   directions with `%st` ("Total size of request + reply traffic with client"), but only
   with a custom `logformat`, so "bytes exchanged" here means bytes delivered to clients.
+  Splunk's [Squid add-on](https://docs.splunk.com/Documentation/AddOns/released/Squid/Setup)
+  makes the same choice: its recommended log format records `%<st` as `bytes_out` and
+  needs the custom `%>st` for `bytes_in`.
 - Field 2 isn't added, even though the spec calls it the header size. It's `%tr`, the
   response time in milliseconds, and the headers are already part of field 5.
 - `unknown` counts events where Squid logged `-1` as the size. In the sample that's 61% of
