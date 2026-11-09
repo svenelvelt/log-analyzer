@@ -13,9 +13,11 @@ from log_analyzer.models import LogRecord
 class Analyzer(Protocol):
     name: str
 
-    def update(self, record: LogRecord) -> None: ...
+    def update(self, record: LogRecord) -> None:
+        """Take one record into account. Called once per record, in input order."""
 
-    def result(self) -> object: ...
+    def result(self) -> object:
+        """Return the result, as something JSON-serializable."""
 
 
 class IpResult(TypedDict):
@@ -42,7 +44,8 @@ class _IpFrequency(ABC):
         return {"ips": sorted(ips, key=_address_order), "count": target}
 
     @abstractmethod
-    def _select(self, counts: Iterable[int]) -> int: ...
+    def _select(self, counts: Iterable[int]) -> int:
+        """Pick the request count to report, from the counts of all IPs."""
 
 
 class MostFrequentIp(_IpFrequency):
