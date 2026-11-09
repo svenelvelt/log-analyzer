@@ -1,6 +1,23 @@
 # log-analyzer
 
-CLI for analyzing log files. Currently supports Squid access logs, plain or gzipped.
+A command-line tool, and a small Python API, for analyzing log files.
+
+## At a glance
+
+- Reads Squid access logs, plain or gzipped, from files or stdin. Input is streamed: the
+  1.6 million lines of the sample take about 5 seconds and under 40 MiB of memory.
+- Fault tolerant: malformed lines are skipped and counted, an unreadable input is reported
+  while the others are still analyzed, and the report is written atomically. See
+  [Exit status](#exit-status).
+- Where the spec and the real data disagree, the data wins, and each decision is
+  documented under [Assumptions](#assumptions): the "CSV" is whitespace-separated, field 2
+  is a duration rather than a size, `-1` means unknown, tied IPs are all returned, and
+  events per second is reported as average and peak.
+- Built to be extended: operations, input formats and output formats each have a registry,
+  and the CLI is a thin layer over a Python function. See [Design](#design).
+- No runtime dependencies, a distroless non-root container, and CI with pinned actions and
+  dependency, secret and image scanning. See [Docker](#docker) and
+  [CI and supply chain](#ci-and-supply-chain).
 
 ## Install
 
@@ -180,65 +197,22 @@ It expects the PersistentVolumeClaims `squid-logs` and `log-analyzer-reports`. T
 `image:` in the manifest is a placeholder: build the image, push it to a registry the
 cluster can pull from, and put that reference there.
 
-## Development
+## Design
 
-Requires [uv](https://docs.astral.sh/uv/).
+Every input is read once. The reader turns bytes into lines, the parser turns each line
+into a `LogRecord`, and each selected analyzer sees every record. The result is a plain
+dictionary, which a formatter turns into text.
 
-```sh
-uv sync                 # create .venv, install package and dev tools
-uv run pytest --cov     # fails below 100% coverage
-uv run ruff check .     # includes the flake8-bandit (S) security rules
-uv run ruff format .
-uv run mypy
-```
-
-The same checks run as git hooks, using the tool versions from `uv.lock`:
-
-```sh
-uv run pre-commit install --hook-type pre-commit --hook-type pre-push
-```
-
-Before each commit this runs ruff, mypy, gitleaks, zizmor on workflow changes and some
-basic file checks. The tests run before each push.
-
-The image scans from CI can be run locally with the Trivy container. The image is handed
-over as a tar file, so Trivy doesn't need access to the Docker socket:
-
-```sh
-docker build -t log-analyzer . && docker save log-analyzer -o /tmp/log-analyzer.tar
-docker run --rm -v /tmp/log-analyzer.tar:/image.tar:ro aquasec/trivy:0.76.1 \
-  image --input /image.tar --severity HIGH,CRITICAL --ignore-unfixed
-docker run --rm -v "$PWD:/repo:ro" aquasec/trivy:0.76.1 \
-  config --severity HIGH,CRITICAL --skip-dirs /repo/.venv /repo
-```
-
-### CI and supply chain
-
-[ci.yml](.github/workflows/ci.yml) runs on every push and pull request:
-
-| Job | What it checks |
-|---|---|
-| lint | ruff, formatting, mypy (strict) |
-| test | pytest on Python 3.11, 3.12, 3.13 and 3.14, 100% coverage required |
-| dependency audit | `pip-audit` on the locked dependencies, with hashes |
-| secret scan | gitleaks over the full git history |
-| workflow audit | [zizmor](https://docs.zizmor.sh/) on the workflows, including a check that every pinned commit really belongs to the action's repository |
-| image | builds the image, runs it on a small log with the hardening flags, then Trivy: fails on fixable HIGH or CRITICAL vulnerabilities in the image, and on HIGH or CRITICAL misconfigurations in the Dockerfile and Kubernetes manifests |
-
-[codeql.yml](.github/workflows/codeql.yml) runs GitHub's CodeQL analysis. It's skipped
-while the repository is private, since code scanning is only free for public repositories.
-
-No image is published for this assignment, but
-[release.yml](.github/workflows/release.yml) shows how a release would work. On a version
-tag such as `v0.1.0` it runs the whole CI again, checks that the tag matches the package
-version, then pushes the image to the GitHub Container Registry with an SBOM and signed
-build provenance, which anyone can check with `gh attestation verify`.
-
-All GitHub Actions are pinned to full commit SHAs, workflows get read-only permissions
-unless a job needs more, and checkouts don't keep the token. Dependabot opens weekly
-update PRs for the actions, the uv lockfile and the base image digests, but only for
-releases at least two weeks old, which leaves time for a compromised release to be caught
-before it lands here. The same two-week rule was used for every version pinned by hand.
+| Module          | Responsibility                                                   |
+|-----------------|------------------------------------------------------------------|
+| `cli.py`        | arguments, where the output goes, exit codes, logging            |
+| `analysis.py`   | `analyze()`: reads each source once and feeds the analyzers      |
+| `reader.py`     | files and streams, gzip, decoding, line limits, malformed lines  |
+| `parsers/`      | one module per input format, registered in `PARSERS`             |
+| `analyzers.py`  | one class per operation, registered in `ANALYZERS`               |
+| `formatters.py` | output formats, registered in `FORMATTERS`                       |
+| `models.py`     | `LogRecord`, what every parser produces                          |
+| `errors.py`     | `ParseError` for a bad line, `InputError` for an unreadable source |
 
 ### Adding an operation
 
@@ -377,6 +351,66 @@ SIEM sizing usually looks at average and peak EPS, so the result has both:
   all events, including about 348,000 `TCP_MISS/200` responses that did send content, so
   the total is a lower bound.
 - With no valid records the result is `{"total": 0, "unknown": 0}`.
+
+## Development
+
+Requires [uv](https://docs.astral.sh/uv/).
+
+```sh
+uv sync                 # create .venv, install package and dev tools
+uv run pytest --cov     # fails below 100% coverage
+uv run ruff check .     # includes the flake8-bandit (S) security rules
+uv run ruff format .
+uv run mypy
+```
+
+The same checks run as git hooks, using the tool versions from `uv.lock`:
+
+```sh
+uv run pre-commit install --hook-type pre-commit --hook-type pre-push
+```
+
+Before each commit this runs ruff, mypy, gitleaks, zizmor on workflow changes and some
+basic file checks. The tests run before each push.
+
+The image scans from CI can be run locally with the Trivy container. The image is handed
+over as a tar file, so Trivy doesn't need access to the Docker socket:
+
+```sh
+docker build -t log-analyzer . && docker save log-analyzer -o /tmp/log-analyzer.tar
+docker run --rm -v /tmp/log-analyzer.tar:/image.tar:ro aquasec/trivy:0.76.1 \
+  image --input /image.tar --severity HIGH,CRITICAL --ignore-unfixed
+docker run --rm -v "$PWD:/repo:ro" aquasec/trivy:0.76.1 \
+  config --severity HIGH,CRITICAL --skip-dirs /repo/.venv /repo
+```
+
+### CI and supply chain
+
+[ci.yml](.github/workflows/ci.yml) runs on every push and pull request:
+
+| Job | What it checks |
+|---|---|
+| lint | ruff, formatting, mypy (strict) |
+| test | pytest on Python 3.11, 3.12, 3.13 and 3.14, 100% coverage required |
+| dependency audit | `pip-audit` on the locked dependencies, with hashes |
+| secret scan | gitleaks over the full git history |
+| workflow audit | [zizmor](https://docs.zizmor.sh/) on the workflows, including a check that every pinned commit really belongs to the action's repository |
+| image | builds the image, runs it on a small log with the hardening flags, then Trivy: fails on fixable HIGH or CRITICAL vulnerabilities in the image, and on HIGH or CRITICAL misconfigurations in the Dockerfile and Kubernetes manifests |
+
+[codeql.yml](.github/workflows/codeql.yml) runs GitHub's CodeQL analysis. It's skipped
+while the repository is private, since code scanning is only free for public repositories.
+
+No image is published for this assignment, but
+[release.yml](.github/workflows/release.yml) shows how a release would work. On a version
+tag such as `v0.1.0` it runs the whole CI again, checks that the tag matches the package
+version, then pushes the image to the GitHub Container Registry with an SBOM and signed
+build provenance, which anyone can check with `gh attestation verify`.
+
+All GitHub Actions are pinned to full commit SHAs, workflows get read-only permissions
+unless a job needs more, and checkouts don't keep the token. Dependabot opens weekly
+update PRs for the actions, the uv lockfile and the base image digests, but only for
+releases at least two weeks old, which leaves time for a compromised release to be caught
+before it lands here. The same two-week rule was used for every version pinned by hand.
 
 ## Sample data
 
