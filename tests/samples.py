@@ -1,7 +1,11 @@
 """Test data used by several test modules."""
 
+from collections.abc import Iterable
+from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
+from log_analyzer.analyzers import Analyzer
 from log_analyzer.models import LogRecord
 
 # Real logs from Squid 6.13, Apache 2.4 and nginx 1.31, recorded in a Docker lab.
@@ -15,19 +19,32 @@ LINES = [
 ]
 
 
-def record(
-    ip: str = "10.0.0.1", timestamp: float = 0.0, response_size: int | None = 0
-) -> LogRecord:
-    """A LogRecord with only the fields that tests care about set."""
-    return LogRecord(
-        timestamp=timestamp,
-        elapsed_ms=0,
-        client_ip=ip,
-        result_code="TCP_MISS/200",
-        response_size=response_size,
-        method="GET",
-        url="http://example.com/",
-        user="-",
-        hierarchy="DIRECT/1.2.3.4",
-        content_type="text/html",
-    )
+_DEFAULT = LogRecord(
+    timestamp=0.0,
+    elapsed_ms=0,
+    client_ip="10.0.0.1",
+    result_code="TCP_MISS/200",
+    response_size=0,
+    method="GET",
+    url="http://example.com/",
+    user="-",
+    hierarchy="DIRECT/1.2.3.4",
+    content_type="text/html",
+)
+
+
+def record(**fields: Any) -> LogRecord:
+    """A LogRecord with defaults, overriding any field by name, e.g. record(client_ip="::1")."""
+    return replace(_DEFAULT, **fields)
+
+
+def records(field: str, values: Iterable[Any]) -> list[LogRecord]:
+    """One record per value, each with `field` set to it."""
+    return [record(**{field: value}) for value in values]
+
+
+def feed(analyzer: Analyzer, records: Iterable[LogRecord]) -> object:
+    """Run `analyzer` over `records` and return its result."""
+    for r in records:
+        analyzer.update(r)
+    return analyzer.result()
