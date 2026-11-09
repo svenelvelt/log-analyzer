@@ -257,6 +257,18 @@ Squid native `access.log`, 10 fields per line.
   The sample file has two: an empty first line, and line 82948 where two records ended up
   on the same line.
 - `-` placeholders (no user, no content type) are kept as is.
+- With Squid's `log_mime_hdrs` option, two more columns follow: the request and the reply
+  headers, each in `[...]`. They are split off and kept as `request_headers` and
+  `reply_headers` on each record. Squid writes brackets inside headers as `%5b` and `%5d`,
+  so the columns can be found reliably. This was checked against real Squid 6.13 logs,
+  which are in [tests/fixtures](tests/fixtures).
+- The [Squid docs](https://wiki.squid-cache.org/Features/LogFormat#squid-native-accesslog-format-in-detail)
+  warn that spaces in URLs are not escaped. In practice they only appear with
+  `uri_whitespace allow`; with the default `strip` Squid removes them, and `encode` escapes
+  them. A line with a space in the URL has more than 10 fields and is skipped like any
+  malformed line, because it looks exactly like a corrupt one: line 82948 of the sample,
+  two records written onto one line, would otherwise be read as a single request with
+  half of the second record in its URL.
 
 ### Reading files
 
@@ -326,8 +338,9 @@ SIEM sizing usually looks at average and peak EPS, so the result has both:
 - `peak` is the most events in any one second. It's computed by counting consecutive
   events with the same second, which keeps memory constant instead of storing a count per
   second (461k seconds, about 34 MiB, for the sample). This relies on each file being in
-  time order, which is how Squid writes it: the sample only goes back in time twice, both
-  at the jumps between periods. If events from one second are split up, for example two
+  time order. Squid writes entries "after the reply finished being sent", according to
+  its docs, and the sample only goes back in time twice, both at the jumps between
+  periods. If events from one second are split up, for example two
   proxies' logs covering the same time, the peak can come out too low but never too high.
 - With no valid records the result is `{"average": 0.0, "peak": 0}`.
 

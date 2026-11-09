@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 from log_analyzer.errors import ParseError
@@ -91,3 +93,55 @@ def test_minus_one_elapsed_means_unknown() -> None:
 def test_rejects_malformed_lines(line: str, reason: str) -> None:
     with pytest.raises(ParseError, match=reason):
         parse_line(line)
+
+
+# Real lines from Squid 6.13 (ubuntu/squid image) with log_mime_hdrs on, see
+# tests/fixtures. The second line of each file is a request for "/my file.txt".
+FIXTURES = Path(__file__).parent.parent / "fixtures"
+MIME_LINES = (FIXTURES / "squid-6.13-log_mime_hdrs.log").read_text().splitlines()
+
+
+def test_mime_headers_are_split_off() -> None:
+    record = parse_line(MIME_LINES[0])
+
+    assert (record.url, record.content_type) == ("http://origin:8000/ok.txt", "text/plain")
+    assert record.request_headers == r"Host: origin:8000\r\nUser-Agent: test-client/1.0\r\n"
+    assert record.reply_headers is not None
+    assert record.reply_headers.startswith(r"HTTP/1.1 200 OK\r\nServer: SimpleHTTP/0.6")
+
+
+def test_brackets_inside_headers_are_escaped_by_squid() -> None:
+    # sent as "User-Agent: odd] agent [x"
+    record = parse_line(MIME_LINES[2])
+
+    assert record.request_headers == r"Host: origin:8000\r\nUser-Agent: odd%5d agent %5bx\r\n"
+
+
+def test_default_uri_whitespace_strips_spaces() -> None:
+    assert parse_line(MIME_LINES[1]).url == "http://origin:8000/myfile.txt"
+
+
+def test_empty_header_columns() -> None:
+    record = parse_line(f"{SAMPLE} [] []")
+
+    assert (record.request_headers, record.reply_headers) == ("", "")
+
+
+def test_no_headers_without_log_mime_hdrs() -> None:
+    record = parse_line(SAMPLE)
+
+    assert (record.request_headers, record.reply_headers) == (None, None)
+
+
+def test_url_with_space_is_rejected() -> None:
+    # Only logged with the non-default `uri_whitespace allow`. It can't be told
+    # apart from a corrupt line, like the two records glued together above.
+    line = (FIXTURES / "squid-6.13-uri_whitespace_allow.log").read_text().strip()
+
+    with pytest.raises(ParseError, match="expected 10 fields, got 11"):
+        parse_line(line)
+
+
+def test_single_bracket_column_is_rejected() -> None:
+    with pytest.raises(ParseError, match="expected 10 fields"):
+        parse_line(f"{SAMPLE} [Host: a.example]")

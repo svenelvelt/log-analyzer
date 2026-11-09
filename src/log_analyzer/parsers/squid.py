@@ -14,9 +14,24 @@ UNKNOWN = "-1"
 _TIMESTAMP = re.compile(r"[0-9]+(?:\.[0-9]+)?")
 _SIZE = re.compile(r"[0-9]{1,18}")
 
+# log_mime_hdrs adds two columns, [request headers] [reply headers], which contain
+# spaces. Squid writes brackets inside them as %5b and %5d, so a raw bracket only
+# ever delimits a column.
+_MIME_HEADERS = re.compile(r"\s\[([^\[\]]*)\]\s+\[([^\[\]]*)\]\s*$")
+
 
 def parse_line(line: str) -> LogRecord:
-    """Parse one access.log line. Raises ParseError if the line is malformed."""
+    """Parse one access.log line. Raises ParseError if the line is malformed.
+
+    Lines with more than 10 fields are rejected, which includes URLs with spaces:
+    Squid only logs those with the non-default `uri_whitespace allow`, and they
+    can't be told apart from a corrupt line.
+    """
+    request_headers = reply_headers = None
+    if line.rstrip().endswith("]") and (headers := _MIME_HEADERS.search(line)):
+        request_headers, reply_headers = headers.groups()
+        line = line[: headers.start()]
+
     # Squid pads columns with spaces, so split on any whitespace.
     fields = line.split()
     if len(fields) != FIELD_COUNT:
@@ -34,6 +49,8 @@ def parse_line(line: str) -> LogRecord:
         user=user,
         hierarchy=hierarchy,
         content_type=ctype,
+        request_headers=request_headers,
+        reply_headers=reply_headers,
     )
 
 

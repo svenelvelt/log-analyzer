@@ -15,3 +15,6 @@ class LogRecord:
     user: str
     hierarchy: str  # e.g. DIRECT/66.102.9.147
     content_type: str
+    # Only logged with Squid's log_mime_hdrs, raw as written (CR/LF appear as \r\n).
+    request_headers: str | None = None
+    reply_headers: str | None = None
