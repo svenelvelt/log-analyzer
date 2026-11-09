@@ -5,13 +5,13 @@ import logging
 import math
 import os
 import sys
-from collections.abc import Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from datetime import UTC, datetime
 from importlib.metadata import version
 from pathlib import Path
 from typing import Any
 
-from log_analyzer.analyzers import ANALYZERS
+from log_analyzer.analyzers import ANALYZERS, Analyzer, parameter
 from log_analyzer.errors import InputError, ParseError
 from log_analyzer.models import LogRecord
 from log_analyzer.parsers import PARSERS
@@ -26,7 +26,7 @@ Source = str | os.PathLike[str] | io.BufferedReader
 
 def analyze(
     sources: Iterable[Source],
-    operations: Iterable[str] | None = None,
+    operations: Iterable[str] | Mapping[str, Any] | None = None,
     *,
     input_format: str = "squid",
 ) -> dict[str, Any]:
@@ -34,21 +34,29 @@ def analyze(
 
     A source is a file path, a binary stream (plain or gzipped), or the string "-"
     for stdin; a Path named "-" is a file. `operations` are analyzer names such as
-    "mfip", all of them by default. Results come in a fixed order. `input_format`
-    is a name from PARSERS, or "auto" to detect it per source.
+    "mfip", all of them by default, or a mapping from name to the operation's value,
+    e.g. {"mfip": 5}; None there means its default. Results come in a fixed order.
+    `input_format` is a name from PARSERS, or "auto" to detect it per source.
 
     Every source is read once. One that can't be read is logged and recorded with
     its error in meta["files"] instead of raising, and records read before the
     error (e.g. from a truncated gzip) stay in the results.
 
-    Raises ValueError for an unknown operation or input format.
+    Raises ValueError for an unknown operation or input format, or an invalid value.
     """
-    requested = set(ANALYZERS if operations is None else operations)
-    if unknown := requested - ANALYZERS.keys():
+    if operations is None:
+        requested: dict[str, Any] = dict.fromkeys(ANALYZERS)
+    elif isinstance(operations, Mapping):
+        requested = dict(operations)
+    else:
+        requested = dict.fromkeys(operations)
+    if unknown := requested.keys() - ANALYZERS.keys():
         raise ValueError(f"unknown operation {', '.join(map(repr, sorted(unknown)))}")
     if input_format != "auto" and input_format not in PARSERS:
         raise ValueError(f"unknown input format {input_format!r}")
-    analyzers = [cls() for name, cls in ANALYZERS.items() if name in requested]
+    analyzers = [
+        _create(cls, requested[name]) for name, cls in ANALYZERS.items() if name in requested
+    ]
 
     files: list[dict[str, Any]] = []
     earliest, latest = math.inf, -math.inf
@@ -88,6 +96,19 @@ def analyze(
         "last": _iso(latest),
     }
     return {"meta": meta, "results": {a.name: a.result() for a in analyzers}}
+
+
+def _create(cls: type[Analyzer], value: Any) -> Analyzer:
+    """Instantiate an analyzer, passing `value` if the operation was given one."""
+    if value is None:
+        return cls()
+    if parameter(cls) is None:
+        raise ValueError(f"operation {cls.name!r} takes no value")
+    factory: Callable[..., Analyzer] = cls  # the Analyzer protocol says nothing about __init__
+    try:
+        return factory(value)
+    except ValueError as e:
+        raise ValueError(f"invalid value for {cls.name!r}: {e}") from e
 
 
 class _Detect:

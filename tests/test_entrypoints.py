@@ -36,7 +36,7 @@ def test_python_dash_m_succeeds(
 
     assert code == 0
     assert json.loads(capsys.readouterr().out)["results"] == {
-        "mfip": {"ips": ["10.0.0.1"], "count": 1}
+        "mfip": {"n": 1, "clients": [{"ip": "10.0.0.1", "count": 1}]}
     }
 
 

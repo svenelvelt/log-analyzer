@@ -21,7 +21,7 @@ def test_selected_operations_in_fixed_order(log: Path) -> None:
     report = analyze([log], ["bytes", "mfip"])
 
     assert report["results"] == {
-        "mfip": {"ips": ["10.0.0.1"], "count": 2},
+        "mfip": {"n": 1, "clients": [{"ip": "10.0.0.1", "count": 2}]},
         "bytes": {"total": 500, "unknown": 0},
     }
 
@@ -34,7 +34,7 @@ def test_reads_a_stream() -> None:
     report = analyze([io.BufferedReader(io.BytesIO(DATA))], ["mfip"])
 
     assert report["meta"]["files"][0]["path"] == "<stream>"
-    assert report["results"] == {"mfip": {"ips": ["10.0.0.1"], "count": 2}}
+    assert report["results"] == {"mfip": {"n": 1, "clients": [{"ip": "10.0.0.1", "count": 2}]}}
 
 
 def test_dash_reads_stdin(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -108,3 +108,31 @@ def test_auto_without_any_known_line(tmp_path: Path) -> None:
     path.write_text("garbage\n")
 
     assert analyze([path], input_format="auto")["meta"]["files"][0]["format"] is None
+
+
+def test_operation_with_a_value(log: Path) -> None:
+    report = analyze([log], {"mfip": 2})
+
+    assert report["results"] == {
+        "mfip": {
+            "n": 2,
+            "clients": [{"ip": "10.0.0.1", "count": 2}, {"ip": "10.0.0.2", "count": 1}],
+        }
+    }
+
+
+def test_operation_value_none_means_default(log: Path) -> None:
+    report = analyze([log], {"lfip": None, "mfip": None})
+
+    assert list(report["results"]) == ["mfip", "lfip"]
+    assert report["results"]["lfip"]["n"] == 1
+
+
+def test_value_for_an_operation_without_parameter() -> None:
+    with pytest.raises(ValueError, match="operation 'bytes' takes no value"):
+        analyze([], {"bytes": 3})
+
+
+def test_invalid_operation_value() -> None:
+    with pytest.raises(ValueError, match="invalid value for 'mfip': n must be at least 1"):
+        analyze([], {"mfip": 0})

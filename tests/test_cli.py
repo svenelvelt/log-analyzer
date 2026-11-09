@@ -36,11 +36,11 @@ def test_single_operation(log: Path, out: Path) -> None:
     code, data = run(out, log, out, "--mfip")
 
     assert code == 0
-    assert data["results"] == {"mfip": {"ips": ["10.0.0.1"], "count": 2}}
+    assert data["results"] == {"mfip": {"n": 1, "clients": [{"ip": "10.0.0.1", "count": 2}]}}
 
 
 def test_results_in_fixed_order_regardless_of_flag_order(log: Path, out: Path) -> None:
-    _, data = run(out, "--bytes", "--eps", log, out, "--lfip", "--mfip")
+    _, data = run(out, "--bytes", "--eps", log, out, "--lfip", "--mfip", "2")
 
     assert list(data["results"]) == ["mfip", "lfip", "eps", "bytes"]
 
@@ -49,8 +49,8 @@ def test_no_flags_runs_all_operations(log: Path, out: Path) -> None:
     _, data = run(out, log, out)
 
     assert data["results"] == {
-        "mfip": {"ips": ["10.0.0.1"], "count": 2},
-        "lfip": {"ips": ["10.0.0.2"], "count": 1},
+        "mfip": {"n": 1, "clients": [{"ip": "10.0.0.1", "count": 2}]},
+        "lfip": {"n": 1, "clients": [{"ip": "10.0.0.2", "count": 1}]},
         "eps": {"average": 1.5, "peak": 2},
         "bytes": {"total": 500, "unknown": 0},
     }
@@ -62,7 +62,12 @@ def test_aggregates_multiple_inputs(log: Path, out: Path) -> None:
 
     _, data = run(out, log, other, out, "--mfip")
 
-    assert data["results"] == {"mfip": {"ips": ["10.0.0.1", "10.0.0.2"], "count": 2}}
+    assert data["results"] == {
+        "mfip": {
+            "n": 1,
+            "clients": [{"ip": "10.0.0.1", "count": 2}, {"ip": "10.0.0.2", "count": 2}],
+        }
+    }
 
 
 def test_flags_between_inputs(log: Path, out: Path) -> None:
@@ -150,7 +155,7 @@ def test_unreadable_input_is_reported_and_others_still_analyzed(log: Path, out: 
         },
         {"path": str(log), "format": "squid", "lines": 3, "events": 3, "skipped": 0, "error": None},
     ]
-    assert data["results"] == {"mfip": {"ips": ["10.0.0.1"], "count": 2}}
+    assert data["results"] == {"mfip": {"n": 1, "clients": [{"ip": "10.0.0.1", "count": 2}]}}
 
 
 def test_unreadable_input_is_logged(log: Path, out: Path, caplog: pytest.LogCaptureFixture) -> None:
@@ -343,7 +348,7 @@ def test_dash_reads_stdin(monkeypatch: pytest.MonkeyPatch, out: Path) -> None:
     assert data["meta"]["files"] == [
         {"path": "<stdin>", "format": "squid", "lines": 3, "events": 3, "skipped": 0, "error": None}
     ]
-    assert data["results"] == {"mfip": {"ips": ["10.0.0.1"], "count": 2}}
+    assert data["results"] == {"mfip": {"n": 1, "clients": [{"ip": "10.0.0.1", "count": 2}]}}
 
 
 def test_dash_reads_gzip_from_stdin(monkeypatch: pytest.MonkeyPatch, out: Path) -> None:
@@ -360,7 +365,12 @@ def test_stdin_and_files_together(monkeypatch: pytest.MonkeyPatch, log: Path, ou
     _, data = run(out, log, "-", out, "--mfip")
 
     assert [f["path"] for f in data["meta"]["files"]] == [str(log), "<stdin>"]
-    assert data["results"] == {"mfip": {"ips": ["10.0.0.1", "10.0.0.2"], "count": 2}}
+    assert data["results"] == {
+        "mfip": {
+            "n": 1,
+            "clients": [{"ip": "10.0.0.1", "count": 2}, {"ip": "10.0.0.2", "count": 2}],
+        }
+    }
 
 
 def test_stdin_twice_is_usage_error(capsys: pytest.CaptureFixture[str]) -> None:
@@ -377,7 +387,7 @@ def test_dot_slash_dash_input_is_a_file(tmp_path: Path, out: Path) -> None:
     _, data = run(out, "./-", out, "--mfip")
 
     assert data["meta"]["files"][0]["path"] == "-"
-    assert data["results"] == {"mfip": {"ips": ["10.0.0.1"], "count": 1}}
+    assert data["results"] == {"mfip": {"n": 1, "clients": [{"ip": "10.0.0.1", "count": 1}]}}
 
 
 @pytest.mark.parametrize("stdin", [None, io.StringIO("text only")], ids=["closed", "no-buffer"])
@@ -514,7 +524,7 @@ def test_input_format_common(out: Path) -> None:
 
     assert code == 0
     assert data["meta"]["events"] == 4
-    assert data["results"]["mfip"] == {"ips": ["172.23.0.4"], "count": 4}
+    assert data["results"]["mfip"] == {"n": 1, "clients": [{"ip": "172.23.0.4", "count": 4}]}
 
 
 def test_input_format_defaults_to_squid(out: Path) -> None:
@@ -548,7 +558,7 @@ def test_output_format_text(log: Path, capsys: pytest.CaptureFixture[str]) -> No
 def test_output_format_defaults_to_json(log: Path, capsys: pytest.CaptureFixture[str]) -> None:
     main([str(log), "-", "--mfip"])
 
-    assert json.loads(capsys.readouterr().out)["results"]["mfip"]["count"] == 2
+    assert json.loads(capsys.readouterr().out)["results"]["mfip"]["clients"][0]["count"] == 2
 
 
 def test_text_names_an_undetected_format(
@@ -560,3 +570,78 @@ def test_text_names_an_undetected_format(
     main([str(path), "-", "--input-format", "auto", "--output-format", "text"])
 
     assert f"{path} (no known format): 0 events, 1 line skipped" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    ("args", "expected"),
+    [
+        pytest.param(
+            ["--mfip"], {"mfip": {"n": 1, "clients": [{"ip": "10.0.0.1", "count": 2}]}}, id="mfip"
+        ),
+        pytest.param(
+            ["--mfip", "2"],
+            {
+                "mfip": {
+                    "n": 2,
+                    "clients": [{"ip": "10.0.0.1", "count": 2}, {"ip": "10.0.0.2", "count": 1}],
+                }
+            },
+            id="mfip-2",
+        ),
+        pytest.param(
+            ["--mfip=1"],
+            {"mfip": {"n": 1, "clients": [{"ip": "10.0.0.1", "count": 2}]}},
+            id="equals",
+        ),
+        pytest.param(
+            ["--lfip", "1"],
+            {"lfip": {"n": 1, "clients": [{"ip": "10.0.0.2", "count": 1}]}},
+            id="lfip-1",
+        ),
+    ],
+)
+def test_operation_with_an_optional_value(
+    log: Path, out: Path, args: list[str], expected: dict[str, Any]
+) -> None:
+    _, data = run(out, log, out, *args)
+
+    assert data["results"] == expected
+
+
+@pytest.mark.parametrize(
+    ("args", "message"),
+    [
+        pytest.param(
+            ["--mfip", "0"], "invalid value for 'mfip': n must be at least 1, got 0", id="zero"
+        ),
+        pytest.param(["--lfip", "ten"], "invalid int value: 'ten'", id="text"),
+    ],
+)
+def test_invalid_operation_value_is_usage_error(
+    log: Path, capsys: pytest.CaptureFixture[str], args: list[str], message: str
+) -> None:
+    with pytest.raises(SystemExit) as exc:
+        main([str(log), "-", *args])
+
+    assert exc.value.code == 2
+    assert message in capsys.readouterr().err
+
+
+def test_optional_value_takes_the_next_argument(
+    log: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # documented pitfall: right before a file name, the file name is read as N
+    with pytest.raises(SystemExit) as exc:
+        main(["--mfip", str(log), "-"])
+
+    assert exc.value.code == 2
+    assert f"invalid int value: '{log}'" in capsys.readouterr().err
+
+
+def test_help_shows_the_optional_value(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit):
+        main(["--help"])
+
+    out = capsys.readouterr().out
+    assert "--mfip [N]" in out
+    assert "--lfip [N]" in out

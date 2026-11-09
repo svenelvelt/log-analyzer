@@ -28,19 +28,29 @@ def to_text(report: dict[str, Any]) -> str:
 
     for name, result in report["results"].items():
         label, render = _RESULTS.get(name, (name, _as_json))
+        if callable(label):
+            label = label(result)
         lines.append(f"{label:<20}{render(result)}")
     return "\n".join(lines) + "\n"
 
 
-def _ips(result: dict[str, Any], shown: int = 5) -> str:
-    ips, count = result["ips"], result["count"]
-    if not ips:
+def _ranking(result: dict[str, Any], shown: int = 5) -> str:
+    clients = result["clients"]
+    if not clients:
         return "none"
-    text = ", ".join(ips[:shown])
-    if len(ips) > shown:
-        text += f" and {len(ips) - shown} more"
-    each = " each" if len(ips) > 1 else ""
-    return f"{text} ({_count(count, 'request')}{each})"
+    if len({c["count"] for c in clients}) == 1:
+        # one shared count, e.g. everyone tied for the fewest requests: a single line
+        ips = [c["ip"] for c in clients]
+        text = ", ".join(ips[:shown])
+        if len(ips) > shown:
+            text += f" and {len(ips) - shown} more"
+        each = " each" if len(ips) > 1 else ""
+        return f"{text} ({_count(clients[0]['count'], 'request')}{each})"
+    # different counts: a small table, one client per line
+    ip_width = max(len(c["ip"]) for c in clients)
+    count_width = max(len(f"{c['count']:,}") for c in clients)
+    rows = [f"{c['ip']:<{ip_width}}  {c['count']:>{count_width},}" for c in clients]
+    return ("\n" + " " * 20).join(rows)
 
 
 def _eps(result: dict[str, Any]) -> str:
@@ -63,9 +73,10 @@ def _as_json(result: Any) -> str:
     return json.dumps(result)
 
 
-_RESULTS: dict[str, tuple[str, Callable[[Any], str]]] = {
-    "mfip": ("Most frequent IP", _ips),
-    "lfip": ("Least frequent IP", _ips),
+# label (or a function making it from the result) and how to show the result
+_RESULTS: dict[str, tuple[str | Callable[[Any], str], Callable[[Any], str]]] = {
+    "mfip": (lambda r: "Most frequent IP" if r["n"] == 1 else f"Top {r['n']} IPs", _ranking),
+    "lfip": (lambda r: "Least frequent IP" if r["n"] == 1 else f"Rarest {r['n']} IPs", _ranking),
     "eps": ("Events per second", _eps),
     "bytes": ("Bytes", _bytes),
 }

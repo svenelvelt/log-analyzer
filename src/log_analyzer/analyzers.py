@@ -1,11 +1,11 @@
 """Streaming analyzers. Each one sees every record once and produces a JSON-serializable result."""
 
+import inspect
 import ipaddress
 import math
 from abc import ABC, abstractmethod
 from collections import Counter
-from collections.abc import Iterable
-from typing import Protocol, TypedDict
+from typing import Any, NamedTuple, Protocol, TypedDict, get_type_hints
 
 from log_analyzer.models import LogRecord
 
@@ -20,50 +20,64 @@ class Analyzer(Protocol):
         """Return the result, as something JSON-serializable."""
 
 
-class IpResult(TypedDict):
-    ips: list[str]
+class ClientCount(TypedDict):
+    ip: str
     count: int
 
 
-class _IpFrequency(ABC):
-    """Counts requests per client IP. Subclasses choose which count they report."""
+class RankingResult(TypedDict):
+    n: int
+    clients: list[ClientCount]
+
+
+class _Ranking(ABC):
+    """Counts requests per client IP and reports the N that come first.
+
+    Clients tied with the Nth are included too, so the list can be longer than N.
+    Subclasses decide the order.
+    """
 
     name: str
 
-    def __init__(self) -> None:
+    def __init__(self, n: int = 1) -> None:
+        if n < 1:
+            raise ValueError(f"n must be at least 1, got {n}")
+        self._n = n
         self._counts: Counter[str] = Counter()
 
     def update(self, record: LogRecord) -> None:
         self._counts[record.client_ip] += 1
 
-    def result(self) -> IpResult:
-        if not self._counts:
-            return {"ips": [], "count": 0}
-        target = self._select(self._counts.values())
-        ips = [ip for ip, n in self._counts.items() if n == target]
-        return {"ips": sorted(ips, key=_address_order), "count": target}
+    def result(self) -> RankingResult:
+        ranked = sorted(
+            self._counts.items(), key=lambda item: (self._rank(item[1]), _address_order(item[0]))
+        )
+        if len(ranked) > self._n:
+            cutoff = self._rank(ranked[self._n - 1][1])
+            ranked = [item for item in ranked if self._rank(item[1]) <= cutoff]
+        return {"n": self._n, "clients": [{"ip": ip, "count": count} for ip, count in ranked]}
 
     @abstractmethod
-    def _select(self, counts: Iterable[int]) -> int:
-        """Pick the request count to report, from the counts of all IPs."""
+    def _rank(self, count: int) -> int:
+        """Sort key for a request count: lower comes first."""
 
 
-class MostFrequentIp(_IpFrequency):
-    """Client IP(s) with the most requests. All tied IPs are returned."""
+class MostFrequentIp(_Ranking):
+    """The N client IPs with the most requests, 1 by default. Ties at the Nth are included."""
 
     name = "mfip"
 
-    def _select(self, counts: Iterable[int]) -> int:
-        return max(counts)
+    def _rank(self, count: int) -> int:
+        return -count
 
 
-class LeastFrequentIp(_IpFrequency):
-    """Client IP(s) with the fewest requests. All tied IPs are returned."""
+class LeastFrequentIp(_Ranking):
+    """The N client IPs with the fewest requests, 1 by default. Ties at the Nth are included."""
 
     name = "lfip"
 
-    def _select(self, counts: Iterable[int]) -> int:
-        return min(counts)
+    def _rank(self, count: int) -> int:
+        return count
 
 
 class EpsResult(TypedDict):
@@ -135,6 +149,26 @@ class TotalBytes:
 
     def result(self) -> BytesResult:
         return {"total": self._total, "unknown": self._unknown}
+
+
+class Parameter(NamedTuple):
+    name: str
+    type: type
+    default: Any
+
+
+def parameter(cls: type[Analyzer]) -> Parameter | None:
+    """The value an operation takes: its constructor's argument, if it has one.
+
+    MostFrequentIp(n: int = 1) takes an int called n, 1 by default, which the CLI
+    offers as --mfip [N]. So giving an operation a value only means giving its
+    constructor an argument with a type hint and a default.
+    """
+    arguments = list(inspect.signature(cls).parameters.values())
+    if not arguments:
+        return None
+    (argument,) = arguments  # one value per operation
+    return Parameter(argument.name, get_type_hints(cls.__init__)[argument.name], argument.default)
 
 
 _ALL: tuple[type[Analyzer], ...] = (MostFrequentIp, LeastFrequentIp, EventsPerSecond, TotalBytes)

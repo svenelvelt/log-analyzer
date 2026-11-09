@@ -4,7 +4,10 @@ from log_analyzer.formatters import FORMATTERS, to_json, to_text
 
 REPORT = {
     "meta": {"tool": "log-analyzer", "first": None},
-    "results": {"mfip": {"ips": ["10.0.0.1"], "count": 2}, "bytes": {"total": 5, "unknown": 0}},
+    "results": {
+        "mfip": {"n": 1, "clients": [{"ip": "10.0.0.1", "count": 2}]},
+        "bytes": {"total": 5, "unknown": 0},
+    },
 }
 
 
@@ -54,8 +57,8 @@ SAMPLE = {
         "last": "2012-05-02T03:18:57.000Z",
     },
     "results": {
-        "mfip": {"ips": ["127.0.0.1"], "count": 1422267},
-        "lfip": {"ips": [f"10.0.0.{i}" for i in range(1, 31)], "count": 1},
+        "mfip": {"n": 1, "clients": [{"ip": "127.0.0.1", "count": 1422267}]},
+        "lfip": {"n": 1, "clients": [{"ip": f"10.0.0.{i}", "count": 1} for i in range(1, 31)]},
         "eps": {"average": 0.005462564623700176, "peak": 7952},
         "bytes": {"total": 2216979451, "unknown": 1001183},
     },
@@ -80,7 +83,7 @@ def test_text_summary() -> None:
 def test_text_without_events() -> None:
     report = {
         "meta": {"tool": "log-analyzer 0.1.0", "files": [], "first": None, "last": None},
-        "results": {"mfip": {"ips": [], "count": 0}, "bytes": {"total": 0, "unknown": 0}},
+        "results": {"mfip": {"n": 1, "clients": []}, "bytes": {"total": 0, "unknown": 0}},
     }
 
     assert to_text(report) == (
@@ -100,3 +103,34 @@ def test_text_shows_unknown_results_generically() -> None:
 
 def test_text_is_registered() -> None:
     assert FORMATTERS["text"] is to_text
+
+
+def test_text_ranking_with_different_counts_is_a_table() -> None:
+    report = {
+        "meta": {"tool": "log-analyzer 0.1.0", "files": [], "first": None, "last": None},
+        "results": {
+            "mfip": {
+                "n": 3,
+                "clients": [
+                    {"ip": "127.0.0.1", "count": 1422267},
+                    {"ip": "10.105.23.212", "count": 7224},
+                    {"ip": "210.8.79.210", "count": 5178},
+                ],
+            }
+        },
+    }
+
+    assert to_text(report).endswith(
+        "Top 3 IPs           127.0.0.1      1,422,267\n"
+        "                    10.105.23.212      7,224\n"
+        "                    210.8.79.210       5,178\n"
+    )
+
+
+def test_text_labels_for_n() -> None:
+    report = {
+        "meta": {"tool": "log-analyzer 0.1.0", "files": [], "first": None, "last": None},
+        "results": {"mfip": {"n": 10, "clients": []}, "lfip": {"n": 5, "clients": []}},
+    }
+
+    assert to_text(report).endswith("Top 10 IPs          none\nRarest 5 IPs        none\n")

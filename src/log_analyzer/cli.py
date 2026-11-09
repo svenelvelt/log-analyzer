@@ -8,11 +8,11 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 from types import FrameType
-from typing import NoReturn
+from typing import Any, NoReturn
 
 from log_analyzer import __version__
 from log_analyzer.analysis import analyze
-from log_analyzer.analyzers import ANALYZERS
+from log_analyzer.analyzers import ANALYZERS, parameter
 from log_analyzer.formatters import FORMATTERS
 from log_analyzer.parsers import PARSERS
 
@@ -63,8 +63,19 @@ def _run(argv: Sequence[str] | None) -> int:
         log.error("%s: %s", args.output, problem)
         return 1
 
-    selected = [name for name in ANALYZERS if getattr(args, name)]
-    report = analyze(args.inputs, selected or None, input_format=args.input_format)
+    selected: dict[str, Any] = {}
+    for name in ANALYZERS:
+        value = getattr(args, name)
+        if value is True:  # a plain switch like --mfip
+            selected[name] = None
+        elif value is not None and value is not False:  # a value like --mfip 5
+            selected[name] = value
+    try:
+        report = analyze(args.inputs, selected or None, input_format=args.input_format)
+    except ValueError as e:
+        # analyze() creates the analyzers before reading any input, so this is a
+        # value the command line asked for that the operation refuses, e.g. --mfip 0
+        parser.error(str(e))
     text = FORMATTERS[args.output_format](report)
     try:
         if args.output == "-":
@@ -171,7 +182,20 @@ def _build_parser() -> argparse.ArgumentParser:
 
     ops = parser.add_argument_group("operations")
     for name, cls in ANALYZERS.items():
-        ops.add_argument(f"--{name}", action="store_true", help=_summary(cls))
+        value = parameter(cls)
+        if value is None:
+            ops.add_argument(f"--{name}", action="store_true", help=_summary(cls))
+        else:
+            # e.g. MostFrequentIp(n: int = 1) becomes --mfip [N], converted with int();
+            # the value is optional, so plain --mfip keeps working as the spec has it
+            ops.add_argument(
+                f"--{name}",
+                nargs="?",
+                const=value.default,
+                type=value.type,
+                metavar=value.name.upper(),
+                help=_summary(cls),
+            )
     return parser
 
 

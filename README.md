@@ -33,13 +33,13 @@ log-analyzer --version
 
 ```
 log-analyzer [--input-format FORMAT] [--output-format FORMAT] [-v | -q]
-             [--mfip] [--lfip] [--eps] [--bytes] INPUT [INPUT ...] OUTPUT
+             [--mfip [N]] [--lfip [N]] [--eps] [--bytes] INPUT [INPUT ...] OUTPUT
 ```
 
 | Option            | Result                                                |
 |-------------------|-------------------------------------------------------|
-| `--mfip`          | most frequent client IP(s)                            |
-| `--lfip`          | least frequent client IP(s)                           |
+| `--mfip [N]`      | the N most frequent client IPs, 1 by default          |
+| `--lfip [N]`      | the N least frequent client IPs, 1 by default         |
 | `--eps`           | average and peak events per second                    |
 | `--bytes`         | total bytes delivered to clients                      |
 | `--input-format`  | `squid` (default), `common` or `auto`, see [Input formats](docs/decisions.md#input-formats) |
@@ -64,7 +64,7 @@ ssh proxy cat /var/log/squid/access.log | log-analyzer - report.json
 
 ### Output
 
-For the sample file (the `lfip` list is shortened here, it has 30 entries):
+For the sample file (the `lfip` list is shortened here, 30 IPs tie):
 
 ```json
 {
@@ -81,8 +81,9 @@ For the sample file (the `lfip` list is shortened here, it has 30 entries):
     "last": "2012-05-02T03:18:57.000Z"
   },
   "results": {
-    "mfip": {"ips": ["127.0.0.1"], "count": 1422267},
-    "lfip": {"ips": ["10.105.21.138", "10.105.21.178", "..."], "count": 1},
+    "mfip": {"n": 1, "clients": [{"ip": "127.0.0.1", "count": 1422267}]},
+    "lfip": {"n": 1, "clients": [{"ip": "10.105.21.138", "count": 1},
+                                 {"ip": "10.105.21.178", "count": 1}, "..."]},
     "eps": {"average": 0.005462564623700176, "peak": 7952},
     "bytes": {"total": 2216979451, "unknown": 1001183}
   }
@@ -241,6 +242,13 @@ record, and a `result()` method that returns something JSON-serializable. Then a
 `_ALL` in `analyzers.py`. The CLI flag `--<name>` and its help text (the first paragraph
 of the docstring) are generated from that list.
 
+If the operation takes a value, like the N in `--mfip [N]`, give its constructor one
+argument with a type hint and a default, as the shared base of `MostFrequentIp` and
+`LeastFrequentIp` does with `n: int = 1`. That's all: the CLI derives `--mfip [N]` from
+it, converts the value with the type, and reports a `ValueError` from the constructor,
+such as `--mfip 0`, as a usage error before reading any input. `analyze()` accepts
+`{"mfip": 5}`.
+
 ### Adding an input format
 
 Write a function that turns one line into a `LogRecord` or raises `ParseError`, and add it
@@ -270,7 +278,8 @@ The reasoning and the evidence for each are in [docs/decisions.md](docs/decision
   like corrupt lines.
 - With `log_mime_hdrs`, the two header columns are split off and kept on the record.
 - Several inputs are analyzed together, as one set of logs.
-- Ties for most or least frequent IP are all returned, sorted by address.
+- `--mfip` and `--lfip` take an optional N, 1 by default, like Splunk's `top` and `rare`.
+  IPs tied with the Nth are all returned, so the list can be longer than N.
 - Events per second is the average over the whole time covered, plus the busiest second.
 - Bytes are the sum of field 5, the reply size including headers. Sizes logged as `-1`
   are counted separately, so the total is a lower bound.

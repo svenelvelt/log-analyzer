@@ -87,22 +87,33 @@ Apache 2.4 and nginx 1.31, which are in [tests/fixtures](../tests/fixtures).
 With several input files, results are aggregated over all of them, e.g. rotated
 `access.log.1`, `access.log.2`, ... give one answer per operation.
 
-### Most and least frequent IP (`--mfip`, `--lfip`)
+### Most and least frequent IP (`--mfip [N]`, `--lfip [N]`)
 
 - The spec asks for "the" most and least frequent IP, but ties are common: in the sample
   file 30 IPs share the lowest count of 1 request. Picking one of them would depend on input
-  order or an arbitrary tie-break and hide the rest, so all tied IPs are returned together
-  with the shared count. The result has the same shape with or without a tie, like
-  `statistics.multimode` in the standard library:
+  order or an arbitrary tie-break and hide the rest, so all tied IPs are returned, each
+  with its count.
+- Both take an optional N for the N most or least frequent IPs, 1 by default, which is the
+  spec's question. This follows the established pattern: Splunk's `top` and `rare`
+  commands and Elasticsearch's `terms` aggregation are the same two rankings with a count.
+  It also answers the next question an analyst asks. On the sample, the most frequent
+  client is `127.0.0.1` with 86% of all requests, the proxy's own local traffic, and
+  `--mfip 10` shows the real clients behind it.
+- Clients tied with the Nth are included too, so the list can be longer than N, and `n`
+  is part of the result. The shape is the same for every N:
 
   ```json
-  {"ips": ["127.0.0.1"], "count": 1422267}
+  {"n": 1, "clients": [{"ip": "127.0.0.1", "count": 1422267}]}
   ```
 
-- Tied IPs are sorted by address (`10.0.0.2` before `10.0.0.10`), IPv4 before IPv6. The
-  client field is counted as is, so if Squid logs hostnames (`log_fqdn on`) those are
+- On the command line N is optional, so plain `--mfip` works as the spec has it. The
+  catch: argparse then takes the next argument as N, so `--mfip access.log out.json`
+  fails with "invalid int value". Put the options after the files, as in all examples
+  here, or write `--mfip=5`.
+- Equal counts are sorted by address (`10.0.0.2` before `10.0.0.10`), IPv4 before IPv6.
+  The client field is counted as is, so if Squid logs hostnames (`log_fqdn on`) those are
   counted too and sorted after the addresses.
-- With no valid records the result is `{"ips": [], "count": 0}`.
+- With no valid records the result is `{"n": 1, "clients": []}`.
 
 ### Events per second (`--eps`)
 
