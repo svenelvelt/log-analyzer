@@ -1,10 +1,9 @@
-from pathlib import Path
-
 import pytest
 
 from log_analyzer.errors import ParseError
 from log_analyzer.models import LogRecord
 from log_analyzer.parsers.squid import parse_line
+from samples import FIXTURES
 
 SAMPLE = (
     "1157689324.156   1372 10.105.21.199 TCP_MISS/200 399 GET "
@@ -95,9 +94,6 @@ def test_rejects_malformed_lines(line: str, reason: str) -> None:
         parse_line(line)
 
 
-# Real lines from Squid 6.13 (ubuntu/squid image) with log_mime_hdrs on, see
-# tests/fixtures. The second line of each file is a request for "/my file.txt".
-FIXTURES = Path(__file__).parent.parent / "fixtures"
 MIME_LINES = (FIXTURES / "squid-6.13-log_mime_hdrs.log").read_text().splitlines()
 
 

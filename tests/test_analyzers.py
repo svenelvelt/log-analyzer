@@ -9,24 +9,7 @@ from log_analyzer.analyzers import (
     MostFrequentIp,
     TotalBytes,
 )
-from log_analyzer.models import LogRecord
-
-
-def record(
-    ip: str = "10.0.0.1", timestamp: float = 0.0, response_size: int | None = 0
-) -> LogRecord:
-    return LogRecord(
-        timestamp=timestamp,
-        elapsed_ms=0,
-        client_ip=ip,
-        result_code="TCP_MISS/200",
-        response_size=response_size,
-        method="GET",
-        url="http://example.com/",
-        user="-",
-        hierarchy="DIRECT/1.2.3.4",
-        content_type="text/html",
-    )
+from samples import record
 
 
 def run(analyzer: Analyzer, ips: Iterable[str]) -> object:

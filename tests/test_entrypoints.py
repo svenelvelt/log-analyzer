@@ -9,10 +9,7 @@ from pathlib import Path
 import pytest
 
 from log_analyzer.cli import main
-
-LINE = (
-    "1157689324.156   1372 10.0.0.1 TCP_MISS/200 399 GET http://a.com/ - DIRECT/1.2.3.4 text/html"
-)
+from samples import LINES
 
 
 def run_module(monkeypatch: pytest.MonkeyPatch, *args: str) -> int | str | None:
@@ -33,7 +30,7 @@ def test_python_dash_m_succeeds(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     log = tmp_path / "access.log"
-    log.write_text(LINE + "\n")
+    log.write_text(LINES[0] + "\n")
 
     code = run_module(monkeypatch, str(log), "-", "--mfip")
 

@@ -13,25 +13,13 @@ import pytest
 
 from log_analyzer import __version__
 from log_analyzer.cli import main
-
-LINES = [
-    "1157689324.156   1372 10.0.0.1 TCP_MISS/200 399 GET http://a.com/ - DIRECT/1.2.3.4 text/html",
-    "1157689324.900    100 10.0.0.2 TCP_MISS/200 100 GET http://b.com/ - DIRECT/1.2.3.4 text/html",
-    "1157689325.500    100 10.0.0.1 TCP_MISS/200 1 GET http://c.com/ - DIRECT/1.2.3.4 text/html",
-]
+from samples import FIXTURES, LINES
 
 
 @pytest.fixture(autouse=True)
 def _in_tmp_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # Relative output paths, intended or not, land in tmp_path instead of the repo.
     monkeypatch.chdir(tmp_path)
-
-
-@pytest.fixture
-def log(tmp_path: Path) -> Path:
-    path = tmp_path / "access.log"
-    path.write_text("\n".join(LINES) + "\n")
-    return path
 
 
 @pytest.fixture
@@ -519,9 +507,6 @@ def test_unwritable_output_directory_fails_before_reading(
 
     assert main([str(log), str(out)]) == 1
     assert capsys.readouterr().err == f"log-analyzer: error: {out}: Permission denied\n"
-
-
-FIXTURES = Path(__file__).parent / "fixtures"
 
 
 def test_input_format_common(out: Path) -> None:

@@ -5,20 +5,9 @@ from pathlib import Path
 import pytest
 
 from log_analyzer import analyze
+from samples import FIXTURES, LINES
 
-LINES = [
-    "1157689324.156   1372 10.0.0.1 TCP_MISS/200 399 GET http://a.com/ - DIRECT/1.2.3.4 text/html",
-    "1157689324.900    100 10.0.0.2 TCP_MISS/200 100 GET http://b.com/ - DIRECT/1.2.3.4 text/html",
-    "1157689325.500    100 10.0.0.1 TCP_MISS/200 1 GET http://c.com/ - DIRECT/1.2.3.4 text/html",
-]
 DATA = ("\n".join(LINES) + "\n").encode()
-
-
-@pytest.fixture
-def log(tmp_path: Path) -> Path:
-    path = tmp_path / "access.log"
-    path.write_bytes(DATA)
-    return path
 
 
 def test_all_operations_by_default(log: Path) -> None:
@@ -80,7 +69,6 @@ def test_unknown_input_format() -> None:
         analyze([], input_format="nope")
 
 
-FIXTURES = Path(__file__).parent / "fixtures"
 CLF = FIXTURES / "squid-6.13-common.log"
 
 

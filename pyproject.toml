@@ -37,6 +37,7 @@ packages = ["src/log_analyzer"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["tests"]
 addopts = ["-ra", "--strict-markers", "--strict-config", "--import-mode=importlib"]
 xfail_strict = true
 
@@ -74,4 +75,5 @@ select = [
 [tool.mypy]
 python_version = "3.11"
 strict = true
+mypy_path = "tests"
 files = ["src", "tests"]

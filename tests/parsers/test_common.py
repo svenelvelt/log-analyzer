@@ -1,13 +1,11 @@
 from datetime import UTC, datetime
-from pathlib import Path
 
 import pytest
 
 from log_analyzer.errors import ParseError
 from log_analyzer.parsers.common import parse_line
+from samples import FIXTURES
 
-# Real logs from Squid 6.13 (logformat common/combined), nginx 1.31 and Apache 2.4.
-FIXTURES = Path(__file__).parent.parent / "fixtures"
 FILES = [
     "squid-6.13-common.log",
     "squid-6.13-combined.log",
