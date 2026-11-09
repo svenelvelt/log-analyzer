@@ -1,3 +1,9 @@
-"""Analyze log files from the command line."""
+"""Analyze log files, from the command line or from Python."""
 
-__version__ = "0.1.0"
+from importlib.metadata import version
+
+from log_analyzer.analysis import analyze
+
+# pyproject.toml is the one place the version is set
+__version__ = version("log-analyzer")
+__all__ = ["__version__", "analyze"]

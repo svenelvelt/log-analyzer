@@ -1,23 +1,16 @@
 import argparse
 import inspect
-import io
 import logging
-import math
 import os
 import secrets
 import sys
-from collections.abc import Iterator, Sequence
-from datetime import UTC, datetime
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any
 
 from log_analyzer import __version__
-from log_analyzer.analyzers import ANALYZERS, Analyzer
-from log_analyzer.errors import InputError
+from log_analyzer.analysis import analyze
+from log_analyzer.analyzers import ANALYZERS
 from log_analyzer.formatters import FORMATTERS
-from log_analyzer.models import LogRecord
-from log_analyzer.parsers import PARSERS
-from log_analyzer.reader import Parser, ReadStats, read_records, read_stream
 
 log = logging.getLogger(__name__)
 
@@ -32,10 +25,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error(f"output {args.output} is also an input")
     _configure_logging(args.verbosity)
 
-    selected = [name for name in ANALYZERS if getattr(args, name)] or list(ANALYZERS)
-    analyzers = [ANALYZERS[name]() for name in selected]
-
-    report = _analyze(args.inputs, PARSERS["squid"], analyzers)
+    selected = [name for name in ANALYZERS if getattr(args, name)]
+    report = analyze(args.inputs, selected or None)
     text = FORMATTERS["json"](report)
     try:
         if args.output == "-":
@@ -73,73 +64,6 @@ def _write_atomic(path: Path, text: str) -> None:
     except BaseException:
         tmp.unlink(missing_ok=True)
         raise
-
-
-def _analyze(inputs: Sequence[str], parse: Parser, analyzers: list[Analyzer]) -> dict[str, Any]:
-    """Read every input once, feeding each record to all analyzers. "-" is stdin.
-
-    An input that can't be read is logged and recorded with its error. Records
-    read before the error (e.g. from a truncated gzip) stay in the results.
-    """
-    read: list[tuple[str, ReadStats, str | None]] = []
-    earliest, latest = math.inf, -math.inf
-
-    for source in inputs:
-        stats = ReadStats()
-        error = None
-        if source == "-":
-            name = "<stdin>"
-            records = _read_stdin(parse, stats)
-        else:
-            name = str(Path(source))
-            records = read_records(Path(source), parse, stats)
-        try:
-            for record in records:
-                earliest = min(earliest, record.timestamp)
-                latest = max(latest, record.timestamp)
-                for analyzer in analyzers:
-                    analyzer.update(record)
-        except InputError as e:
-            log.error("%s", e)
-            error = e.reason
-        read.append((name, stats, error))
-
-    meta = {
-        "tool": f"log-analyzer {__version__}",
-        "files": [
-            {
-                "path": name,
-                "lines": s.lines,
-                "events": s.records,
-                "skipped": s.skipped,
-                "error": err,
-            }
-            for name, s, err in read
-        ],
-        "lines": sum(s.lines for _, s, _ in read),
-        "events": sum(s.records for _, s, _ in read),
-        "skipped": sum(s.skipped for _, s, _ in read),
-        "first": _iso(earliest),
-        "last": _iso(latest),
-    }
-    return {"meta": meta, "results": {a.name: a.result() for a in analyzers}}
-
-
-def _read_stdin(parse: Parser, stats: ReadStats) -> Iterator[LogRecord]:
-    # Normally a BufferedReader, but stdin can be closed (None) or replaced by an
-    # object without a byte buffer. As a generator, this raises inside the caller's
-    # loop, where InputError is reported like any other unreadable input.
-    stdin = getattr(sys.stdin, "buffer", None)
-    if not isinstance(stdin, io.BufferedReader):
-        raise InputError("<stdin>", "stdin is not readable")
-    yield from read_stream(stdin, "<stdin>", parse, stats)
-
-
-def _iso(timestamp: float) -> str | None:
-    if not math.isfinite(timestamp):
-        return None
-    dt = datetime.fromtimestamp(timestamp, UTC)
-    return dt.isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
 def _build_parser() -> argparse.ArgumentParser:

@@ -87,6 +87,28 @@ so a caller gets the partial result together with the reason.
 The output file is written to a temporary file next to it and then renamed, so an existing
 report is never left half-written.
 
+### From Python
+
+The CLI is a thin layer over one function, which returns the same report as a dictionary.
+That makes it usable from an automation, for example a SOAR playbook, without going
+through files or a subprocess:
+
+```python
+import io
+from log_analyzer import analyze
+
+report = analyze(["access.log", "access.log.1.gz"])
+report = analyze(["access.log"], ["mfip", "eps"])
+
+# data that never touches the disk, e.g. fetched from an API
+report = analyze([io.BufferedReader(io.BytesIO(data))], ["bytes"])
+print(report["results"]["bytes"]["total"])
+```
+
+Sources can be paths, binary streams (plain or gzipped) or `"-"` for stdin. Unreadable
+sources end up in `report["meta"]["files"]` with their error, as with the CLI; an unknown
+operation raises `ValueError`.
+
 ## Docker
 
 ```sh
