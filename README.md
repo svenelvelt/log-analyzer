@@ -32,8 +32,8 @@ log-analyzer --version
 ## Usage
 
 ```
-log-analyzer [--input-format FORMAT] [--output-format FORMAT] [-v | -q]
-             [--mfip [N]] [--lfip [N]] [--eps] [--bytes] INPUT [INPUT ...] OUTPUT
+log-analyzer INPUT [INPUT ...] OUTPUT [--mfip [N]] [--lfip [N]] [--eps] [--bytes]
+             [--input-format FORMAT] [--output-format FORMAT] [-v | -q]
 ```
 
 | Option            | Result                                                |
@@ -47,8 +47,10 @@ log-analyzer [--input-format FORMAT] [--output-format FORMAT] [-v | -q]
 | `-v`, `--verbose` | also log every skipped line                           |
 | `-q`, `--quiet`   | only log errors                                       |
 
-Without any operation flag all of them run. Several inputs are analyzed together, and
-flags can go anywhere on the command line. An `INPUT` of `-` reads stdin, plain or gzipped.
+Without any operation flag all of them run. Several inputs are analyzed together. Options
+go after the files: `--mfip` and `--lfip` take an optional N, so a file name right after
+them would be read as N (`--mfip=5` is also fine). An `INPUT` of `-` reads stdin, plain or
+gzipped.
 `OUTPUT` is the file for the report, or `-` for stdout
 (use `./-` for a file actually named `-`). It can't be one of the inputs, so a mixed-up
 command line can't overwrite a log. Messages go to stderr, so stdout stays valid JSON.

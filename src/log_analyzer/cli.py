@@ -137,6 +137,9 @@ def _write_atomic(path: Path, text: str) -> None:
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="log-analyzer",
+        # Files first: an option with an optional value (--mfip [N]) would read a file
+        # name that follows it as its value. The options are listed below the usage line.
+        usage="%(prog)s INPUT [INPUT ...] OUTPUT [options]",
         description="Analyze access logs. Runs all operations if none is selected.",
     )
     # Kept as str for the same reason as OUTPUT below.

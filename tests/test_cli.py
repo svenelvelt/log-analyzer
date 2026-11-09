@@ -645,3 +645,13 @@ def test_help_shows_the_optional_value(capsys: pytest.CaptureFixture[str]) -> No
     out = capsys.readouterr().out
     assert "--mfip [N]" in out
     assert "--lfip [N]" in out
+
+
+def test_usage_puts_the_files_first(capsys: pytest.CaptureFixture[str]) -> None:
+    # options with an optional value (--mfip [N]) must not come right before a file name
+    with pytest.raises(SystemExit):
+        main(["--help"])
+
+    assert capsys.readouterr().out.startswith(
+        "usage: log-analyzer INPUT [INPUT ...] OUTPUT [options]\n"
+    )
