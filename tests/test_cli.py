@@ -551,3 +551,27 @@ def test_input_format_auto(log: Path, out: Path) -> None:
 
     assert [f["format"] for f in data["meta"]["files"]] == ["squid", "common"]
     assert data["meta"]["events"] == 7
+
+
+def test_output_format_text(log: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    code = main([str(log), "-", "--output-format", "text", "--mfip"])
+
+    assert code == 0
+    assert capsys.readouterr().out.endswith("Most frequent IP    10.0.0.1 (2 requests)\n")
+
+
+def test_output_format_defaults_to_json(log: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    main([str(log), "-", "--mfip"])
+
+    assert json.loads(capsys.readouterr().out)["results"]["mfip"]["count"] == 2
+
+
+def test_text_names_an_undetected_format(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path = tmp_path / "junk.log"
+    path.write_text("garbage\n")
+
+    main([str(path), "-", "--input-format", "auto", "--output-format", "text"])
+
+    assert f"{path} (no known format): 0 events, 1 line skipped" in capsys.readouterr().out

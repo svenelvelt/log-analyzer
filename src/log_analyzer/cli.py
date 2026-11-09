@@ -65,7 +65,7 @@ def _run(argv: Sequence[str] | None) -> int:
 
     selected = [name for name in ANALYZERS if getattr(args, name)]
     report = analyze(args.inputs, selected or None, input_format=args.input_format)
-    text = FORMATTERS["json"](report)
+    text = FORMATTERS[args.output_format](report)
     try:
         if args.output == "-":
             sys.stdout.write(text)
@@ -131,7 +131,9 @@ def _build_parser() -> argparse.ArgumentParser:
     # Kept as str for the same reason as OUTPUT below.
     parser.add_argument("inputs", nargs="+", metavar="INPUT", help="log file(s), - for stdin")
     # Kept as str: Path("./-") would normalize to "-" and make a file named "-" unreachable.
-    parser.add_argument("output", metavar="OUTPUT", help="JSON file to write, - for stdout")
+    parser.add_argument(
+        "output", metavar="OUTPUT", help="file to write the report to, - for stdout"
+    )
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     parser.add_argument(
         "--input-format",
@@ -140,6 +142,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="squid: Squid's native access.log (default); "
         "common: Common Log Format, also combined, as written by Squid, Apache and nginx; "
         "auto: detect it for each input",
+    )
+    parser.add_argument(
+        "--output-format",
+        choices=list(FORMATTERS),
+        default="json",
+        help="json: the complete report (default); text: a short summary for people",
     )
 
     verbosity = parser.add_mutually_exclusive_group()

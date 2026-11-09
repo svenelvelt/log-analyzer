@@ -32,8 +32,8 @@ log-analyzer --version
 ## Usage
 
 ```
-log-analyzer [--input-format FORMAT] [-v | -q] [--mfip] [--lfip] [--eps] [--bytes]
-             INPUT [INPUT ...] OUTPUT
+log-analyzer [--input-format FORMAT] [--output-format FORMAT] [-v | -q]
+             [--mfip] [--lfip] [--eps] [--bytes] INPUT [INPUT ...] OUTPUT
 ```
 
 | Option            | Result                                                |
@@ -43,12 +43,13 @@ log-analyzer [--input-format FORMAT] [-v | -q] [--mfip] [--lfip] [--eps] [--byte
 | `--eps`           | average and peak events per second                    |
 | `--bytes`         | total bytes delivered to clients                      |
 | `--input-format`  | `squid` (default), `common` or `auto`, see [Input formats](#input-formats) |
+| `--output-format` | `json` (default) or `text`, see [Output](#output)      |
 | `-v`, `--verbose` | also log every skipped line                           |
 | `-q`, `--quiet`   | only log errors                                       |
 
 Without any operation flag all of them run. Several inputs are analyzed together, and
 flags can go anywhere on the command line. An `INPUT` of `-` reads stdin, plain or gzipped.
-`OUTPUT` is a JSON file, or `-` for stdout
+`OUTPUT` is the file for the report, or `-` for stdout
 (use `./-` for a file actually named `-`). It can't be one of the inputs, so a mixed-up
 command line can't overwrite a log. Messages go to stderr, so stdout stays valid JSON.
 
@@ -93,6 +94,21 @@ For the sample file (the `lfip` list is shortened here, it has 30 entries):
 - `first` and `last` are the earliest and latest event in UTC.
 - Results always come in the order mfip, lfip, eps, bytes. Why they look the way they do
   is explained under [Assumptions](#assumptions).
+
+JSON is the default and the complete report. `--output-format text` prints a short summary
+for reading in a terminal instead, with long IP lists cut after five entries:
+
+```
+$ log-analyzer access.log.gz - --output-format text
+log-analyzer 0.1.0
+access.log.gz (squid): 1,643,518 events, 2 lines skipped
+Period: 2002-10-19T20:30:37.745Z to 2012-05-02T03:18:57.000Z
+
+Most frequent IP    127.0.0.1 (1,422,267 requests)
+Least frequent IP   10.105.21.138, 10.105.21.178, 10.105.41.121, 10.105.47.186, 10.105.53.146 and 25 more (1 request each)
+Events per second   0.005463 on average, 7,952 at peak
+Bytes               2,216,979,451 (size unknown for 1,001,183 events)
+```
 
 ### Exit status
 
@@ -236,7 +252,9 @@ and error handling are shared, and `--input-format` offers every registered pars
 Write a function that takes the report (the `meta` and `results` dictionary shown under
 [Output](#output)) and returns the text to write, and add it to `FORMATTERS` in
 `formatters.py`. Writing to a file or stdout, including the atomic replace, stays in the
-CLI. JSON is the only format so far, so there's no option to choose one yet.
+CLI, and `--output-format` offers every registered format. A result the `text` format
+doesn't know yet, from a newly added operation, is shown as JSON there until it gets a
+readable line of its own.
 
 ## Assumptions
 
