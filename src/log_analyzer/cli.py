@@ -14,6 +14,7 @@ from log_analyzer import __version__
 from log_analyzer.analysis import analyze
 from log_analyzer.analyzers import ANALYZERS
 from log_analyzer.formatters import FORMATTERS
+from log_analyzer.parsers import PARSERS
 
 log = logging.getLogger(__name__)
 
@@ -63,7 +64,7 @@ def _run(argv: Sequence[str] | None) -> int:
         return 1
 
     selected = [name for name in ANALYZERS if getattr(args, name)]
-    report = analyze(args.inputs, selected or None)
+    report = analyze(args.inputs, selected or None, input_format=args.input_format)
     text = FORMATTERS["json"](report)
     try:
         if args.output == "-":
@@ -125,13 +126,20 @@ def _write_atomic(path: Path, text: str) -> None:
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="log-analyzer",
-        description="Analyze Squid access logs. Runs all operations if none is selected.",
+        description="Analyze access logs. Runs all operations if none is selected.",
     )
     # Kept as str for the same reason as OUTPUT below.
     parser.add_argument("inputs", nargs="+", metavar="INPUT", help="log file(s), - for stdin")
     # Kept as str: Path("./-") would normalize to "-" and make a file named "-" unreachable.
     parser.add_argument("output", metavar="OUTPUT", help="JSON file to write, - for stdout")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
+    parser.add_argument(
+        "--input-format",
+        choices=list(PARSERS),
+        default="squid",
+        help="squid: Squid's native access.log (default); "
+        "common: Common Log Format, also combined, as written by Squid, Apache and nginx",
+    )
 
     verbosity = parser.add_mutually_exclusive_group()
     verbosity.add_argument(

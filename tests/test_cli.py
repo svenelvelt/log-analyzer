@@ -207,7 +207,7 @@ def test_failed_write_keeps_previous_output(
 ) -> None:
     out.write_text("old")
 
-    def fail(*_: object) -> None:
+    def fail(*_: object, **__: object) -> None:
         raise OSError(28, "No space left on device")
 
     monkeypatch.setattr(Path, "replace", fail)
@@ -413,7 +413,7 @@ def test_closed_stdout_pipe_exits_quietly(
 def test_ctrl_c_exits_130_without_traceback(
     log: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    def interrupt(*_: object) -> None:
+    def interrupt(*_: object, **__: object) -> None:
         raise KeyboardInterrupt
 
     monkeypatch.setattr("log_analyzer.cli.analyze", interrupt)
@@ -427,7 +427,7 @@ def test_ctrl_c_while_writing_keeps_previous_output(
 ) -> None:
     out.write_text("old")
 
-    def interrupt(*_: object) -> None:
+    def interrupt(*_: object, **__: object) -> None:
         raise KeyboardInterrupt
 
     monkeypatch.setattr(Path, "replace", interrupt)
@@ -440,7 +440,7 @@ def test_ctrl_c_while_writing_keeps_previous_output(
 @pytest.fixture
 def sigterm_safety_net() -> Iterator[None]:
     # If main() doesn't handle SIGTERM, fail the test instead of killing pytest.
-    def unhandled(*_: object) -> None:
+    def unhandled(*_: object, **__: object) -> None:
         raise AssertionError("SIGTERM reached the test process unhandled")
 
     previous = signal.signal(signal.SIGTERM, unhandled)
@@ -453,7 +453,7 @@ def test_sigterm_exits_143(
     log: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     # what docker stop or Kubernetes sends, arriving in the middle of the analysis
-    def terminated(*_: object) -> None:
+    def terminated(*_: object, **__: object) -> None:
         os.kill(os.getpid(), signal.SIGTERM)
 
     monkeypatch.setattr("log_analyzer.cli.analyze", terminated)
@@ -473,7 +473,7 @@ def test_sigterm_handler_is_restored(log: Path, out: Path) -> None:
 
 @pytest.fixture
 def must_not_read(monkeypatch: pytest.MonkeyPatch) -> None:
-    def fail(*_: object) -> None:
+    def fail(*_: object, **__: object) -> None:
         raise AssertionError("inputs were read although the output can't be written")
 
     monkeypatch.setattr("log_analyzer.cli.analyze", fail)
@@ -511,3 +511,28 @@ def test_unwritable_output_directory_fails_before_reading(
 
     assert main([str(log), str(out)]) == 1
     assert capsys.readouterr().err == f"log-analyzer: error: {out}: Permission denied\n"
+
+
+FIXTURES = Path(__file__).parent / "fixtures"
+
+
+def test_input_format_common(out: Path) -> None:
+    code, data = run(out, FIXTURES / "squid-6.13-common.log", out, "--input-format", "common")
+
+    assert code == 0
+    assert data["meta"]["events"] == 4
+    assert data["results"]["mfip"] == {"ips": ["172.23.0.4"], "count": 4}
+
+
+def test_input_format_defaults_to_squid(out: Path) -> None:
+    _, data = run(out, FIXTURES / "squid-6.13-common.log", out)
+
+    assert (data["meta"]["events"], data["meta"]["skipped"]) == (0, 4)
+
+
+def test_unknown_input_format_is_usage_error(log: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as exc:
+        main([str(log), "-", "--input-format", "xml"])
+
+    assert exc.value.code == 2
+    assert "invalid choice: 'xml'" in capsys.readouterr().err

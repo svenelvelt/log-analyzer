@@ -4,7 +4,8 @@ A command-line tool, and a small Python API, for analyzing log files.
 
 ## At a glance
 
-- Reads Squid access logs, plain or gzipped, from files or stdin. Input is streamed: the
+- Reads Squid's native access log, or the Common Log Format that Squid, Apache and nginx
+  can write, plain or gzipped, from files or stdin. Input is streamed: the
   1.6 million lines of the sample take about 5 seconds and under 40 MiB of memory.
 - Fault tolerant: malformed lines are skipped and counted, an unreadable input is reported
   while the others are still analyzed, and the report is written atomically. See
@@ -31,7 +32,8 @@ log-analyzer --version
 ## Usage
 
 ```
-log-analyzer [-v | -q] [--mfip] [--lfip] [--eps] [--bytes] INPUT [INPUT ...] OUTPUT
+log-analyzer [--input-format FORMAT] [-v | -q] [--mfip] [--lfip] [--eps] [--bytes]
+             INPUT [INPUT ...] OUTPUT
 ```
 
 | Option            | Result                                                |
@@ -40,6 +42,7 @@ log-analyzer [-v | -q] [--mfip] [--lfip] [--eps] [--bytes] INPUT [INPUT ...] OUT
 | `--lfip`          | least frequent client IP(s)                           |
 | `--eps`           | average and peak events per second                    |
 | `--bytes`         | total bytes delivered to clients                      |
+| `--input-format`  | `squid` (default) or `common`, see [Input formats](#input-formats) |
 | `-v`, `--verbose` | also log every skipped line                           |
 | `-q`, `--quiet`   | only log errors                                       |
 
@@ -225,8 +228,7 @@ of the docstring) are generated from that list.
 
 Write a function that turns one line into a `LogRecord` or raises `ParseError`, and add it
 to `PARSERS` in `parsers/__init__.py`. Reading, gzip, encoding, the timestamp range check
-and error handling are shared. The CLI uses the `squid` parser for now; a `--format` option would come with the
-second parser.
+and error handling are shared, and `--input-format` offers every registered parser.
 
 ### Adding an output format
 
@@ -237,9 +239,11 @@ CLI. JSON is the only format so far, so there's no option to choose one yet.
 
 ## Assumptions
 
-### Input format
+### Input formats
 
-Squid native `access.log`, 10 fields per line.
+#### Squid native (`--input-format squid`, the default)
+
+Squid's own `access.log` format, 10 fields per line.
 
 - The spec calls the format CSV, but the fields are whitespace-separated and Squid pads the
   second column, so lines are split on any run of whitespace.
@@ -269,6 +273,26 @@ Squid native `access.log`, 10 fields per line.
   malformed line, because it looks exactly like a corrupt one: line 82948 of the sample,
   two records written onto one line, would otherwise be read as a single request with
   half of the second record in its URL.
+
+#### Common Log Format (`--input-format common`)
+
+The format Squid writes with `logformat common` or `combined`, and the one Apache and
+nginx use for their access logs. It was checked against real logs from Squid 6.13,
+Apache 2.4 and nginx 1.31, which are in [tests/fixtures](tests/fixtures).
+
+- Only the first seven fields are standard: `host ident user [time] "request" status size`.
+  Everything after them differs by producer (referrer and user agent in `combined`,
+  Squid's cache status, nginx's `X-Forwarded-For`), and Squid doesn't escape quotes in
+  them, so they are ignored. The exception is Squid's status at the end, such as
+  `TCP_MISS:HIER_DIRECT`, which fills the result code and hierarchy.
+- Times have a precision of one second and include a time zone.
+- A size of `-` means no bytes were sent, as Apache writes it.
+- Bytes mean what the producer logs: Squid counts the headers, Apache's `%b` and nginx's
+  `$body_bytes_sent` only the body.
+- Web servers log the request path (`/index.html`) rather than the full URL. There's no
+  duration or content type, so those fields are empty.
+- A line whose request isn't `METHOD URL PROTOCOL` is malformed, for example the `"-"`
+  nginx logs for connections that never sent a request.
 
 ### Reading files
 
