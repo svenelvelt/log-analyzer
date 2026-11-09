@@ -80,6 +80,9 @@ For the sample file (the `lfip` list is shortened here, it has 30 entries):
 | 0    | all inputs read and the output written                                   |
 | 1    | an input couldn't be read, or the output couldn't be written             |
 | 2    | invalid command line                                                     |
+| 130  | interrupted with Ctrl-C                                                  |
+| 143  | stopped with SIGTERM, e.g. by `docker stop` or Kubernetes                |
+| 141  | stdout was closed early, e.g. piped into `head`; no message is printed   |
 
 If an input fails, the other inputs are still analyzed and the output is still written,
 so a caller gets the partial result together with the reason.

@@ -2,7 +2,10 @@ import gzip
 import io
 import json
 import logging
+import os
+import signal
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -407,3 +410,78 @@ def test_unusable_stdin_is_an_input_error(
 
     assert code == 1
     assert data["meta"]["files"][0]["error"] == "stdin is not readable"
+
+
+def test_closed_stdout_pipe_exits_quietly(
+    log: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # like `log-analyzer ... - | head -1`, with head already gone
+    read_end, write_end = os.pipe()
+    os.close(read_end)
+    with os.fdopen(write_end, "w") as closed_pipe:
+        monkeypatch.setattr(sys, "stdout", closed_pipe)
+        code = main([str(log), "-"])
+
+    assert code == 141
+    assert capsys.readouterr().err == ""
+
+
+def test_ctrl_c_exits_130_without_traceback(
+    log: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def interrupt(*_: object) -> None:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("log_analyzer.cli.analyze", interrupt)
+
+    assert main([str(log), "-"]) == 130
+    assert capsys.readouterr().err == "log-analyzer: error: interrupted\n"
+
+
+def test_ctrl_c_while_writing_keeps_previous_output(
+    log: Path, out: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    out.write_text("old")
+
+    def interrupt(*_: object) -> None:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(Path, "replace", interrupt)
+
+    assert main([str(log), str(out)]) == 130
+    assert out.read_text() == "old"
+    assert sorted(p.name for p in out.parent.iterdir()) == ["access.log", "out.json"]
+
+
+@pytest.fixture
+def sigterm_safety_net() -> Iterator[None]:
+    # If main() doesn't handle SIGTERM, fail the test instead of killing pytest.
+    def unhandled(*_: object) -> None:
+        raise AssertionError("SIGTERM reached the test process unhandled")
+
+    previous = signal.signal(signal.SIGTERM, unhandled)
+    yield
+    signal.signal(signal.SIGTERM, previous)
+
+
+@pytest.mark.usefixtures("sigterm_safety_net")
+def test_sigterm_exits_143(
+    log: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # what docker stop or Kubernetes sends, arriving in the middle of the analysis
+    def terminated(*_: object) -> None:
+        os.kill(os.getpid(), signal.SIGTERM)
+
+    monkeypatch.setattr("log_analyzer.cli.analyze", terminated)
+
+    assert main([str(log), "-"]) == 143
+    assert capsys.readouterr().err == "log-analyzer: error: terminated\n"
+
+
+@pytest.mark.usefixtures("sigterm_safety_net")
+def test_sigterm_handler_is_restored(log: Path, out: Path) -> None:
+    before = signal.getsignal(signal.SIGTERM)
+
+    main([str(log), str(out)])
+
+    assert signal.getsignal(signal.SIGTERM) is before

@@ -3,9 +3,12 @@ import inspect
 import logging
 import os
 import secrets
+import signal
 import sys
 from collections.abc import Sequence
 from pathlib import Path
+from types import FrameType
+from typing import NoReturn
 
 from log_analyzer import __version__
 from log_analyzer.analysis import analyze
@@ -16,6 +19,36 @@ log = logging.getLogger(__name__)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    # docker stop and Kubernetes send SIGTERM. Its default action is to kill the
+    # process without cleanup, and as PID 1 in a container Python would even
+    # ignore it, so handle it like Ctrl-C.
+    previous = signal.signal(signal.SIGTERM, _terminate)
+    try:
+        return _run(argv)
+    except KeyboardInterrupt:
+        _stopped("interrupted")
+        return 130  # 128 + SIGINT, like other Unix tools
+    except _Terminated:
+        _stopped("terminated")
+        return 143  # 128 + SIGTERM
+    finally:
+        signal.signal(signal.SIGTERM, previous)
+
+
+class _Terminated(BaseException):
+    """Raised on SIGTERM. A BaseException, like KeyboardInterrupt, so only main() catches it."""
+
+
+def _terminate(signum: int, frame: FrameType | None) -> NoReturn:
+    raise _Terminated
+
+
+def _stopped(how: str) -> None:
+    # print, not log: logging may not be set up yet
+    print(f"log-analyzer: error: {how}", file=sys.stderr)
+
+
+def _run(argv: Sequence[str] | None) -> int:
     parser = _build_parser()
     args = parser.parse_intermixed_args(argv)
     if args.inputs.count("-") > 1:
@@ -31,8 +64,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         if args.output == "-":
             sys.stdout.write(text)
+            sys.stdout.flush()  # so a closed pipe fails here, not at interpreter exit
         else:
             _write_atomic(Path(args.output), text)
+    except BrokenPipeError:
+        # The reader went away, e.g. `| head`, which isn't worth an error message.
+        # Point stdout at /dev/null so Python's final flush has nothing to fail on.
+        devnull = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(devnull, sys.stdout.fileno())
+        os.close(devnull)
+        return 141  # 128 + SIGPIPE, like other Unix tools
     except OSError as e:
         log.error("%s: %s", args.output, e.strerror or e)
         return 1
