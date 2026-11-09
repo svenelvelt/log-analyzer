@@ -44,6 +44,29 @@ def analyze(
 
     Raises ValueError for an unknown operation or input format, or an invalid value.
     """
+    requested = _requested(operations)
+    if input_format != "auto" and input_format not in PARSERS:
+        raise ValueError(f"unknown input format {input_format!r}")
+    analyzers = [
+        _create(cls, requested[name]) for name, cls in ANALYZERS.items() if name in requested
+    ]
+
+    time_range = _TimeRange()
+    files = [_read(source, input_format, analyzers, time_range) for source in sources]
+    meta = {
+        "tool": TOOL,
+        "files": files,
+        "lines": sum(f["lines"] for f in files),
+        "events": sum(f["events"] for f in files),
+        "skipped": sum(f["skipped"] for f in files),
+        "first": _iso(time_range.earliest),
+        "last": _iso(time_range.latest),
+    }
+    return {"meta": meta, "results": {a.name: a.result() for a in analyzers}}
+
+
+def _requested(operations: Iterable[str] | Mapping[str, Any] | None) -> dict[str, Any]:
+    """The requested operations as {name: value}, where None means the default value."""
     if operations is None:
         requested: dict[str, Any] = dict.fromkeys(ANALYZERS)
     elif isinstance(operations, Mapping):
@@ -52,50 +75,49 @@ def analyze(
         requested = dict.fromkeys(operations)
     if unknown := requested.keys() - ANALYZERS.keys():
         raise ValueError(f"unknown operation {', '.join(map(repr, sorted(unknown)))}")
-    if input_format != "auto" and input_format not in PARSERS:
-        raise ValueError(f"unknown input format {input_format!r}")
-    analyzers = [
-        _create(cls, requested[name]) for name, cls in ANALYZERS.items() if name in requested
-    ]
+    return requested
 
-    files: list[dict[str, Any]] = []
-    earliest, latest = math.inf, -math.inf
 
-    for source in sources:
-        stats = ReadStats()
-        error = None
-        parse = _Detect() if input_format == "auto" else PARSERS[input_format]
-        name, records = _open(source, parse, stats)
-        try:
-            for record in records:
-                earliest = min(earliest, record.timestamp)
-                latest = max(latest, record.timestamp)
-                for analyzer in analyzers:
-                    analyzer.update(record)
-        except InputError as e:
-            log.error("%s", e)
-            error = e.reason
-        files.append(
-            {
-                "path": name,
-                "format": parse.format if isinstance(parse, _Detect) else input_format,
-                "lines": stats.lines,
-                "events": stats.records,
-                "skipped": stats.skipped,
-                "error": error,
-            }
-        )
+class _TimeRange:
+    """The earliest and latest event over all sources, for meta's first and last."""
 
-    meta = {
-        "tool": TOOL,
-        "files": files,
-        "lines": sum(f["lines"] for f in files),
-        "events": sum(f["events"] for f in files),
-        "skipped": sum(f["skipped"] for f in files),
-        "first": _iso(earliest),
-        "last": _iso(latest),
+    def __init__(self) -> None:
+        self.earliest = math.inf
+        self.latest = -math.inf
+
+    def update(self, record: LogRecord) -> None:
+        self.earliest = min(self.earliest, record.timestamp)
+        self.latest = max(self.latest, record.timestamp)
+
+
+def _read(
+    source: Source, input_format: str, analyzers: list[Analyzer], time_range: _TimeRange
+) -> dict[str, Any]:
+    """Feed every record of `source` to the analyzers and return its entry for meta["files"].
+
+    A source that can't be read is logged and gets its error in the entry instead of
+    raising. Records read before the error (e.g. from a truncated gzip) still count.
+    """
+    stats = ReadStats()
+    parse = _Detect() if input_format == "auto" else PARSERS[input_format]
+    name, records = _open(source, parse, stats)
+    error = None
+    try:
+        for record in records:
+            time_range.update(record)
+            for analyzer in analyzers:
+                analyzer.update(record)
+    except InputError as e:
+        log.error("%s", e)
+        error = e.reason
+    return {
+        "path": name,
+        "format": parse.format if isinstance(parse, _Detect) else input_format,
+        "lines": stats.lines,
+        "events": stats.records,
+        "skipped": stats.skipped,
+        "error": error,
     }
-    return {"meta": meta, "results": {a.name: a.result() for a in analyzers}}
 
 
 def _create(cls: type[Analyzer], value: Any) -> Analyzer:
