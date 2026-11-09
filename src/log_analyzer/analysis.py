@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from log_analyzer.analyzers import ANALYZERS
-from log_analyzer.errors import InputError
+from log_analyzer.errors import InputError, ParseError
 from log_analyzer.models import LogRecord
 from log_analyzer.parsers import PARSERS
 from log_analyzer.reader import Parser, ReadStats, read_records, read_stream
@@ -34,7 +34,8 @@ def analyze(
 
     A source is a file path, a binary stream (plain or gzipped), or the string "-"
     for stdin; a Path named "-" is a file. `operations` are analyzer names such as
-    "mfip", all of them by default. Results come in a fixed order.
+    "mfip", all of them by default. Results come in a fixed order. `input_format`
+    is a name from PARSERS, or "auto" to detect it per source.
 
     Every source is read once. One that can't be read is logged and recorded with
     its error in meta["files"] instead of raising, and records read before the
@@ -45,17 +46,17 @@ def analyze(
     requested = set(ANALYZERS if operations is None else operations)
     if unknown := requested - ANALYZERS.keys():
         raise ValueError(f"unknown operation {', '.join(map(repr, sorted(unknown)))}")
-    if input_format not in PARSERS:
+    if input_format != "auto" and input_format not in PARSERS:
         raise ValueError(f"unknown input format {input_format!r}")
-    parse = PARSERS[input_format]
     analyzers = [cls() for name, cls in ANALYZERS.items() if name in requested]
 
-    read: list[tuple[str, ReadStats, str | None]] = []
+    files: list[dict[str, Any]] = []
     earliest, latest = math.inf, -math.inf
 
     for source in sources:
         stats = ReadStats()
         error = None
+        parse = _Detect() if input_format == "auto" else PARSERS[input_format]
         name, records = _open(source, parse, stats)
         try:
             for record in records:
@@ -66,27 +67,50 @@ def analyze(
         except InputError as e:
             log.error("%s", e)
             error = e.reason
-        read.append((name, stats, error))
+        files.append(
+            {
+                "path": name,
+                "format": parse.format if isinstance(parse, _Detect) else input_format,
+                "lines": stats.lines,
+                "events": stats.records,
+                "skipped": stats.skipped,
+                "error": error,
+            }
+        )
 
     meta = {
         "tool": TOOL,
-        "files": [
-            {
-                "path": name,
-                "lines": s.lines,
-                "events": s.records,
-                "skipped": s.skipped,
-                "error": err,
-            }
-            for name, s, err in read
-        ],
-        "lines": sum(s.lines for _, s, _ in read),
-        "events": sum(s.records for _, s, _ in read),
-        "skipped": sum(s.skipped for _, s, _ in read),
+        "files": files,
+        "lines": sum(f["lines"] for f in files),
+        "events": sum(f["events"] for f in files),
+        "skipped": sum(f["skipped"] for f in files),
         "first": _iso(earliest),
         "last": _iso(latest),
     }
     return {"meta": meta, "results": {a.name: a.result() for a in analyzers}}
+
+
+class _Detect:
+    """Parser for input_format="auto", used for one source.
+
+    The first line that one of the parsers accepts decides the format, and the
+    rest of the source is read with that parser.
+    """
+
+    def __init__(self) -> None:
+        self.format: str | None = None
+
+    def __call__(self, line: str) -> LogRecord:
+        if self.format:
+            return PARSERS[self.format](line)
+        for name, parse in PARSERS.items():
+            try:
+                record = parse(line)
+            except ParseError:
+                continue
+            self.format = name
+            return record
+        raise ParseError("not in any known format")
 
 
 def _open(source: Source, parse: Parser, stats: ReadStats) -> tuple[str, Iterator[LogRecord]]:

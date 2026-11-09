@@ -42,7 +42,7 @@ log-analyzer [--input-format FORMAT] [-v | -q] [--mfip] [--lfip] [--eps] [--byte
 | `--lfip`          | least frequent client IP(s)                           |
 | `--eps`           | average and peak events per second                    |
 | `--bytes`         | total bytes delivered to clients                      |
-| `--input-format`  | `squid` (default) or `common`, see [Input formats](#input-formats) |
+| `--input-format`  | `squid` (default), `common` or `auto`, see [Input formats](#input-formats) |
 | `-v`, `--verbose` | also log every skipped line                           |
 | `-q`, `--quiet`   | only log errors                                       |
 
@@ -70,7 +70,8 @@ For the sample file (the `lfip` list is shortened here, it has 30 entries):
   "meta": {
     "tool": "log-analyzer 0.1.0",
     "files": [
-      {"path": "access.log.gz", "lines": 1643520, "events": 1643518, "skipped": 2, "error": null}
+      {"path": "access.log.gz", "format": "squid", "lines": 1643520, "events": 1643518,
+       "skipped": 2, "error": null}
     ],
     "lines": 1643520,
     "events": 1643518,
@@ -87,8 +88,8 @@ For the sample file (the `lfip` list is shortened here, it has 30 entries):
 }
 ```
 
-- `meta.files` lists every input. A file that couldn't be read has its `error` set, and
-  keeps the counts from before the failure.
+- `meta.files` lists every input with the format it was read in. A file that couldn't be
+  read has its `error` set, and keeps the counts from before the failure.
 - `first` and `last` are the earliest and latest event in UTC.
 - Results always come in the order mfip, lfip, eps, bytes. Why they look the way they do
   is explained under [Assumptions](#assumptions).
@@ -240,6 +241,12 @@ CLI. JSON is the only format so far, so there's no option to choose one yet.
 ## Assumptions
 
 ### Input formats
+
+`--input-format` picks one format for all inputs. With `auto`, the format is detected for
+each input separately: the first line that one of the parsers accepts decides, and the rest
+of that input is read in the same format. Lines before that are skipped as malformed. The
+detected format is in `meta.files`, or `null` if no line matched. `squid` stays the default
+because it's the format the assignment is about, and an explicit format never guesses.
 
 #### Squid native (`--input-format squid`, the default)
 

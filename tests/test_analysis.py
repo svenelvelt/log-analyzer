@@ -78,3 +78,45 @@ def test_unknown_operation() -> None:
 def test_unknown_input_format() -> None:
     with pytest.raises(ValueError, match="unknown input format 'nope'"):
         analyze([], input_format="nope")
+
+
+FIXTURES = Path(__file__).parent / "fixtures"
+CLF = FIXTURES / "squid-6.13-common.log"
+
+
+def test_each_file_reports_its_format(log: Path) -> None:
+    report = analyze([log], ["bytes"])
+
+    assert report["meta"]["files"][0]["format"] == "squid"
+
+
+def test_auto_detects_the_format_per_file(log: Path) -> None:
+    report = analyze([log, CLF], ["mfip"], input_format="auto")
+
+    assert [f["format"] for f in report["meta"]["files"]] == ["squid", "common"]
+    assert report["meta"]["events"] == 7
+
+
+def test_auto_skips_unknown_lines_before_detection(tmp_path: Path) -> None:
+    path = tmp_path / "access.log"
+    path.write_text("garbage\n" + CLF.read_text())
+
+    files = analyze([path], input_format="auto")["meta"]["files"]
+
+    assert (files[0]["format"], files[0]["events"], files[0]["skipped"]) == ("common", 4, 1)
+
+
+def test_auto_keeps_the_detected_format_for_the_rest_of_the_file(tmp_path: Path) -> None:
+    path = tmp_path / "access.log"
+    path.write_text(LINES[0] + "\n" + CLF.read_text())
+
+    files = analyze([path], input_format="auto")["meta"]["files"]
+
+    assert (files[0]["format"], files[0]["events"], files[0]["skipped"]) == ("squid", 1, 4)
+
+
+def test_auto_without_any_known_line(tmp_path: Path) -> None:
+    path = tmp_path / "access.log"
+    path.write_text("garbage\n")
+
+    assert analyze([path], input_format="auto")["meta"]["files"][0]["format"] is None

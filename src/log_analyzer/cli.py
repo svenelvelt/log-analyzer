@@ -135,10 +135,11 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     parser.add_argument(
         "--input-format",
-        choices=list(PARSERS),
+        choices=[*PARSERS, "auto"],
         default="squid",
         help="squid: Squid's native access.log (default); "
-        "common: Common Log Format, also combined, as written by Squid, Apache and nginx",
+        "common: Common Log Format, also combined, as written by Squid, Apache and nginx; "
+        "auto: detect it for each input",
     )
 
     verbosity = parser.add_mutually_exclusive_group()

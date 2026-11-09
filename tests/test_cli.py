@@ -114,8 +114,15 @@ def test_meta_files_and_totals(log: Path, out: Path) -> None:
     meta = data["meta"]
 
     assert meta["files"] == [
-        {"path": str(log), "lines": 3, "events": 3, "skipped": 0, "error": None},
-        {"path": str(other), "lines": 2, "events": 1, "skipped": 1, "error": None},
+        {"path": str(log), "format": "squid", "lines": 3, "events": 3, "skipped": 0, "error": None},
+        {
+            "path": str(other),
+            "format": "squid",
+            "lines": 2,
+            "events": 1,
+            "skipped": 1,
+            "error": None,
+        },
     ]
     assert (meta["lines"], meta["events"], meta["skipped"]) == (5, 4, 1)
 
@@ -147,12 +154,13 @@ def test_unreadable_input_is_reported_and_others_still_analyzed(log: Path, out: 
     assert data["meta"]["files"] == [
         {
             "path": str(missing),
+            "format": "squid",
             "lines": 0,
             "events": 0,
             "skipped": 0,
             "error": "No such file or directory",
         },
-        {"path": str(log), "lines": 3, "events": 3, "skipped": 0, "error": None},
+        {"path": str(log), "format": "squid", "lines": 3, "events": 3, "skipped": 0, "error": None},
     ]
     assert data["results"] == {"mfip": {"ips": ["10.0.0.1"], "count": 2}}
 
@@ -345,7 +353,7 @@ def test_dash_reads_stdin(monkeypatch: pytest.MonkeyPatch, out: Path) -> None:
 
     assert code == 0
     assert data["meta"]["files"] == [
-        {"path": "<stdin>", "lines": 3, "events": 3, "skipped": 0, "error": None}
+        {"path": "<stdin>", "format": "squid", "lines": 3, "events": 3, "skipped": 0, "error": None}
     ]
     assert data["results"] == {"mfip": {"ips": ["10.0.0.1"], "count": 2}}
 
@@ -536,3 +544,10 @@ def test_unknown_input_format_is_usage_error(log: Path, capsys: pytest.CaptureFi
 
     assert exc.value.code == 2
     assert "invalid choice: 'xml'" in capsys.readouterr().err
+
+
+def test_input_format_auto(log: Path, out: Path) -> None:
+    _, data = run(out, log, FIXTURES / "squid-6.13-common.log", out, "--input-format", "auto")
+
+    assert [f["format"] for f in data["meta"]["files"]] == ["squid", "common"]
+    assert data["meta"]["events"] == 7
