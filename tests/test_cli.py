@@ -5,7 +5,7 @@ import logging
 import os
 import signal
 import sys
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -216,22 +216,6 @@ def test_failed_write_keeps_previous_output(
     assert code == 1
     assert out.read_text() == "old"
     assert sorted(p.name for p in out.parent.iterdir()) == ["access.log", "out.json"]
-
-
-def test_output_directory_missing(
-    log: Path, tmp_path: Path, caplog: pytest.LogCaptureFixture
-) -> None:
-    out = tmp_path / "nope" / "out.json"
-
-    with caplog.at_level(logging.ERROR, logger="log_analyzer"):
-        code = main([str(log), str(out)])
-
-    assert code == 1
-    assert caplog.messages == [f"{out}: No such file or directory"]
-
-
-def test_output_is_a_directory(log: Path, tmp_path: Path) -> None:
-    assert main([str(log), str(tmp_path)]) == 1
 
 
 def test_dash_writes_to_stdout(log: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -485,3 +469,45 @@ def test_sigterm_handler_is_restored(log: Path, out: Path) -> None:
     main([str(log), str(out)])
 
     assert signal.getsignal(signal.SIGTERM) is before
+
+
+@pytest.fixture
+def must_not_read(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fail(*_: object) -> None:
+        raise AssertionError("inputs were read although the output can't be written")
+
+    monkeypatch.setattr("log_analyzer.cli.analyze", fail)
+
+
+@pytest.mark.usefixtures("must_not_read")
+@pytest.mark.parametrize(
+    ("make_output", "reason"),
+    [
+        pytest.param(lambda d: d / "nope" / "out.json", "No such file or directory", id="no-dir"),
+        pytest.param(lambda d: d, "Is a directory", id="is-dir"),
+    ],
+)
+def test_unusable_output_fails_before_reading(
+    log: Path,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    make_output: Callable[[Path], Path],
+    reason: str,
+) -> None:
+    out = make_output(tmp_path)
+
+    assert main([str(log), str(out)]) == 1
+    assert capsys.readouterr().err == f"log-analyzer: error: {out}: {reason}\n"
+
+
+@pytest.mark.usefixtures("must_not_read")
+@pytest.mark.skipif(os.geteuid() == 0, reason="root can write anywhere")
+def test_unwritable_output_directory_fails_before_reading(
+    log: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    locked = tmp_path / "locked"
+    locked.mkdir(mode=0o500)
+    out = locked / "out.json"
+
+    assert main([str(log), str(out)]) == 1
+    assert capsys.readouterr().err == f"log-analyzer: error: {out}: Permission denied\n"

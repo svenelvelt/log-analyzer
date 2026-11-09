@@ -88,7 +88,8 @@ If an input fails, the other inputs are still analyzed and the output is still w
 so a caller gets the partial result together with the reason.
 
 The output file is written to a temporary file next to it and then renamed, so an existing
-report is never left half-written.
+report is never left half-written. Whether the output location is usable is checked before
+any input is read, so a typo in the path doesn't cost a long run over large logs.
 
 ### From Python
 

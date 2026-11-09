@@ -57,6 +57,10 @@ def _run(argv: Sequence[str] | None) -> int:
     if args.output != "-" and any(_same_file(Path(args.output), f) for f in files):
         parser.error(f"output {args.output} is also an input")
     _configure_logging(args.verbosity)
+    if args.output != "-" and (problem := _output_problem(Path(args.output))):
+        # checked before reading, which can take minutes for large logs
+        log.error("%s: %s", args.output, problem)
+        return 1
 
     selected = [name for name in ANALYZERS if getattr(args, name)]
     report = analyze(args.inputs, selected or None)
@@ -79,6 +83,17 @@ def _run(argv: Sequence[str] | None) -> int:
         return 1
     failed = any(f["error"] for f in report["meta"]["files"])
     return 1 if failed else 0
+
+
+def _output_problem(path: Path) -> str | None:
+    """Why `path` can't be written, if that's already clear before writing."""
+    if path.is_dir():
+        return "Is a directory"
+    if not path.parent.is_dir():
+        return "No such file or directory"
+    if not os.access(path.parent, os.W_OK):
+        return "Permission denied"
+    return None
 
 
 def _same_file(a: Path, b: Path) -> bool:
