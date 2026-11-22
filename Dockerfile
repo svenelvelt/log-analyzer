@@ -3,7 +3,7 @@
 # Base images are pinned by digest (Dependabot keeps them current). Builder and
 # runtime share Python 3.13 so the bytecode compiled in the build stage is valid
 # at runtime.
-FROM python:3.13-slim-trixie@sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90 AS build
+FROM python:3.15-slim-trixie@sha256:65a65fc7b30b06cb6df4930fd4650697cb23f4c2698ab81fc87e4b031bc36928 AS build
 
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_NO_CACHE_DIR=1 \
